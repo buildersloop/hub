@@ -1,0 +1,25 @@
+{
+  "name": "buildersloop-hub",
+  "version": "8.0.0",
+  "hubVersion": "V8",
+  "description": "BuildersLoop Hub — 複数の事業を並列で動かす、専用のワークスペース（Claude Code の並列セッション・アプリ内ブラウザ・エージェントが操作できる MCP）",
+  "main": "src/main.js",
+  "private": true,
+  "license": "MIT",
+  "repository": { "type": "git", "url": "https://github.com/buildersloop/hub.git" },
+  "homepage": "https://github.com/buildersloop/hub#readme",
+  "bugs": { "url": "https://github.com/buildersloop/hub/issues" },
+  "scripts": {
+    "start": "electron .",
+    "test": "node test/unit.test.js",
+    "e2e": "node test/e2e.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.1",
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/xterm": "^6.0.0",
+    "electron": "^44.7.0",
+    "node-pty": "^1.1.0",
+    "zod": "^4.6.6"
+  }
+}

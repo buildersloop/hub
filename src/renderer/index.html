@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data:">
+<title>BuildersLoop Hub</title>
+<link rel="stylesheet" href="../../node_modules/@xterm/xterm/css/xterm.css">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app">
+  <header id="top">
+    <button id="btnSide" title="左の一覧をたたむ">☰</button>
+    <div class="brand">◆ BuildersLoop Hub</div>
+    <div class="grow"></div>
+    <div class="grp" title="セッションの表示の仕方"><span class="lbl">表示</span>
+      <button data-view="grid">並べる</button><button data-view="tabs">タブ</button></div>
+    <div class="grp" title="並列の列数"><span class="lbl">列</span>
+      <button data-cols="1">1</button><button data-cols="2">2</button><button data-cols="3">3</button><button data-cols="4">4</button></div>
+    <div class="grp" title="ブラウザの表示"><span class="lbl">ブラウザ</span>
+      <button data-dock="dock">右</button><button data-dock="mini">小</button><button data-dock="hidden">隠す</button></div>
+    <button id="btnBoard" title="共同作業ボード：各セッションが、いま何をしているか・競合">共同作業</button>
+    <button id="btnConn" title="MCP の接続：GitHub・Slack・Notion などのサービスを登録し、セッションごとにつなぐ">接続</button>
+    <button id="btnMcp" title="エージェントがこのアプリを操作する窓口">MCP</button>
+    <button id="btnLog" title="操作ログ">ログ</button>
+  </header>
+  <div id="body">
+    <nav id="side"></nav>
+    <main id="main"><div id="tabbar" class="hidden"></div><div id="grid"></div><div id="empty">左の「＋ 新規セッション」から始めます。<br>事業ごとに、Claude Code を並列で動かせます。</div></main>
+    <aside id="dock">
+      <div id="dockbar">
+        <div id="tabs"></div>
+        <div class="urlrow">
+          <button id="bBack">◀</button><button id="bFwd">▶</button><button id="bReload">⟳</button>
+          <input id="url" placeholder="URL を入力して Enter（http／https）" spellcheck="false">
+          <button id="bNew" title="新しいタブ">＋</button>
+          <button id="bMini" title="小さく／大きく">⤢</button>
+        </div>
+        <div class="acct" id="acct"></div>
+      </div>
+      <div id="browserHost"></div>
+    </aside>
+  </div>
+  <footer id="log" class="hidden"></footer>
+</div>
+<div id="modal" class="hidden"></div>
+<div id="toast" class="hidden"></div>
+<script src="../../node_modules/@xterm/xterm/lib/xterm.js"></script>
+<script src="../../node_modules/@xterm/addon-fit/lib/addon-fit.js"></script>
+<script src="renderer.js"></script>
+</body>
+</html>

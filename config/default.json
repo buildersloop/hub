@@ -1,0 +1,16 @@
+{
+  "settings": { "mcpPort": 17890, "cdp": false, "cdpPort": 9333, "claudeArgs": [], "orgRules": "" },
+  "ui": { "open": [], "cols": 2, "dock": "dock", "dockWidth": 560, "currentBusiness": "general" },
+  "sessions": [],
+  "businesses": [
+    {
+      "id": "general", "name": "はじめての事業", "color": "#c586c0",
+      "cwd": "",
+      "links": [],
+      "presets": [
+        { "name": "今日の状況まとめ", "prompt": "作業フォルダの README・CLAUDE.md と直近の変更を読んで、いまの状況を短くまとめ、今日やるとよいことを優先順位つきで提案して。外部への送信・公開・デプロイはしない。" }
+      ],
+      "note": "見本の事業です。「🗂 事業の管理」で、名前・作業フォルダ・メモを、自分の事業に合わせて変えてください。"
+    }
+  ]
+}

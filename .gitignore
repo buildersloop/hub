@@ -1,0 +1,9 @@
+node_modules/
+dist/
+smoke.err
+smoke.out
+.last-sessions
+*.log
+# 持ち主の手元だけのもの（公開しない）：個人のパス・運用の記録
+CLAUDE.local.md
+private/
