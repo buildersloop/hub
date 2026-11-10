@@ -53,10 +53,10 @@ class ClaudeStatus {
     let done = false;
     let timer = null;
     const finish = (v) => { if (done) return; done = true; clearTimeout(timer); cb(v); };
+    p.on('error', () => finish(null));   // 起動できない（EMFILE など）ときも、あとで 'error' が来る。先に受ける
     timer = setTimeout(() => { killTree(p); finish(null); }, this.timeoutMs);
     if (!p.stdout) { killTree(p); finish(null); return; }
     p.stdout.on('data', (d) => { out += d; if (out.length > 2e6) { killTree(p); finish(null); } });
-    p.on('error', () => finish(null));
     p.on('close', (code) => finish(code === 0 ? out : null));
   }
   // 一覧を取り直す（失敗しても reject しない）。force：いまから取りに行った結果を待つ（直前の Enter の見直し用）

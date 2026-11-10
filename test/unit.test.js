@@ -113,7 +113,7 @@ check('確認の検出：ふつうの英語の文に、誤って当たらない'
   for (const s of ['Please ask the data center to confirm the address.', 'Would you like to continue with the refactor?', 'presenter to confirm']) {
     assert.strictEqual(looksLikePermissionPrompt(s), false, s);
   }
-  assert.strictEqual(looksLikePermissionPrompt('Overwrite?(y/n)'), true, '空白の無い型は、空白を抜いた形にも当てる');
+  assert.strictEqual(looksLikePermissionPrompt(stripAnsi('Overwrite? (y\x1b[5;9H/n)')), true, '空白の無い型は、空白を抜いた形にも当てる（位置の指定で分かれた (y/n)）');
 });
 check('確認の語：空白を抜いた形でも、エージェントの文から見つける（言い換えた日本語は通す）', () => {
   const { permissionWordsIn } = require('../src/guard');
