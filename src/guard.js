@@ -6,14 +6,17 @@ const ANSI = /\x1b\[[0-?]*[ -\/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[()
 const CURSOR_FORWARD = /\x1b\[(\d*)C/g;
 const CURSOR_POSITION = /\x1b\[\d*(?:;\d*)?[Hf]/g;
 
-// 画面を消す制御（ESC[2J・ESC[3J・別の画面への切り替え ESC[?1049h・ESC c）より前の文字は、もう画面に無い。
+// 画面を消す制御（ESC[2J・別の画面への切り替え ESC[?1049h・ESC c）より前の文字は、もう画面に無い。
 // 読むときは、最後のものより後だけを見る（答え終わった確認の画面が、末尾に残って、確認ありと見誤るのを防ぐ）。
-const CLEAR_SCREEN = /\x1b\[[23]J|\x1b\[\?1049h|\x1bc/g;
+// ESC[3J は、さかのぼりの記録だけを消し、見えている画面は残るので、切れ目にしない。
+// 切れ目のあとに、元の画面へ戻る制御（ESC[?1049l）があれば、消す前の画面が戻るので、切らずに全体を読む（安全な側）。
+const CLEAR_SCREEN = /\x1b\[2J|\x1b\[\?1049h|\x1bc/g;
 function afterLastClear(s) {
   const t = String(s);
   let end = -1;
   for (const m of t.matchAll(CLEAR_SCREEN)) end = m.index + m[0].length;
-  return end < 0 ? t : t.slice(end);
+  if (end < 0 || t.includes('\x1b[?1049l', end)) return t;
+  return t.slice(end);
 }
 
 function stripAnsi(s) {
@@ -50,12 +53,14 @@ const PERMISSION_PATTERNS = [
   /Press Enter to (confirm|continue|approve)/i,
   /permission (request|required|prompt)/i,
   /Esc to cancel/i,
-  /Enter to confirm/i,
+  /\bEnter to confirm\b/i,
   /Yes, I trust this folder/i,
-  /Would you like to (proceed|continue)/i,
+  /Would you like to proceed\?/i,
   /Bypass Permissions|dangerously/i,
 ];
-// 描き直し（変わった所だけを描く）では、文字が抜けたり、空白が増えたりする。空白を全部抜いた形でも、代表的な語を見る。
+// 描き直し（変わった所だけを描く）では、文字が抜けたり、空白が増えたりする。空白を全部抜いた形でも、代表的な語を見る
+// （空白の無い型〔(y/n) など〕は、ふつうの型のまま、空白を抜いた形にも当てる）。
+// 語の区切りを見られないので、ほかの語の一部になりやすい語（enter to confirm → "data center to confirm" など）は入れない。
 const SQUEEZED_PATTERNS = [
   /doyouwantto(proceed|makethisedit|create|allow|run|continue|trust|apply|overwrite|use)/i,
   /doyoutrust/i,
@@ -63,8 +68,7 @@ const SQUEEZED_PATTERNS = [
   /yes,?itrustthisfolder/i,
   /yes,?anddon'?taskagain/i,
   /esctocancel/i,
-  /entertoconfirm/i,
-  /wouldyouliketo(proceed|continue)/i,
+  /wouldyouliketoproceed\?/i,
 ];
 const oneSpace = (t) => t.replace(/[ \t]+/g, ' ');
 const squeeze = (t) => t.replace(/\s+/g, '');
@@ -73,7 +77,7 @@ function firstHit(text) {
   const a = PERMISSION_PATTERNS.find((re) => re.test(t));
   if (a) return (t.match(a) || [''])[0] || ' ';
   const sq = squeeze(t);
-  const b = SQUEEZED_PATTERNS.find((re) => re.test(sq));
+  const b = SQUEEZED_PATTERNS.find((re) => re.test(sq)) || PERMISSION_PATTERNS.find((re) => re.test(sq));
   return b ? (sq.match(b) || [''])[0] || ' ' : '';
 }
 function looksLikePermissionPrompt(screenText) {

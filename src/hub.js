@@ -67,7 +67,10 @@ class Hub extends EventEmitter {
     super();
     this.store = store;
     // Claude Code 自身が知らせる「人の答えを待っている」（画面の検出を補う。試験では、差し替える）
-    this.claudeStatus = claudeStatus || new ClaudeStatus({ env: cleanEnv(process.env) });
+    this.claudeStatus = claudeStatus || new ClaudeStatus({
+      env: cleanEnv(process.env),
+      onUnavailable: () => this.audit('Hub', 'status', 'Claude Code の会話の状態（claude agents --json）が取れません（古い版など）。確認の画面は、画面の文字だけで見ます'),
+    });
     // 秘密の値の暗号化（本番は Electron の safeStorage。試験では、暗号化しない代用品）
     const box = secretBox || { available: () => true, encrypt: (t) => Buffer.from(t, 'utf8').toString('base64'), decrypt: (b) => Buffer.from(b, 'base64').toString('utf8') };
     this.conns = new Connections({ store, box });
@@ -245,10 +248,12 @@ class Hub extends EventEmitter {
       const quiet = Date.now() - this.ptys.lastOutputAt(id);
       const drawn = this.ptys.snapshot(id).length > 200;
       if (drawn && quiet > 1800 && Date.now() - t0 > 3500 && !looksLikePermissionPrompt(this.ptys.readText(id, 2500))) {
-        // Claude Code 自身にも聞く（画面に出ない確認もあるため）。答えを待っていれば、まだ準備中
-        this.claudeStatus.refresh().then(() => {
+        // Claude Code 自身にも聞く（画面に出ない確認もあるため）。答えを待っていれば、まだ準備中。
+        // 聞いているあいだに画面が動いたら（確認が描かれた等）、もう一度、静かになるのを待つ
+        this.claudeStatus.refresh().catch(() => {}).then(() => {
           if (!this.ptys.isRunning(id) || this._ready.has(id)) return;
-          if (!this.claudeStatus.waiting(id) && !looksLikePermissionPrompt(this.ptys.readText(id, 2500))) this._markReady(id);
+          const stillQuiet = Date.now() - this.ptys.lastOutputAt(id) > 1800;
+          if (stillQuiet && !this.claudeStatus.waiting(id) && !looksLikePermissionPrompt(this.ptys.readText(id, 2500))) this._markReady(id);
           else setTimeout(tick, 700);
         });
         return;
@@ -366,13 +371,16 @@ class Hub extends EventEmitter {
       const drawn = this.ptys.snapshot(id).length > 200;
       const timeUp = Date.now() - t0 > timeoutMs;
       if ((drawn && quiet > 1800 && Date.now() - t0 > 3500) || timeUp) {
-        this.claudeStatus.refresh().then(() => {
+        const giveUpOrWait = () => {
+          if (!timeUp) { setTimeout(tick, 1000); return; }
+          if (onGiveUp) onGiveUp('prompt');
+        };
+        // 画面に確認が見えているあいだは、Claude Code に聞かずに待つ（claude を何度も起動しない）
+        if (looksLikePermissionPrompt(this.ptys.readText(id, 2500))) { giveUpOrWait(); return; }
+        this.claudeStatus.refresh().catch(() => {}).then(() => {
           if (!this.ptys.isRunning(id)) { if (onGiveUp) onGiveUp('stopped'); return; }
-          if (looksLikePermissionPrompt(this.ptys.readText(id, 2500)) || this.claudeStatus.waiting(id)) {
-            if (!timeUp) { setTimeout(tick, 1000); return; }
-            if (onGiveUp) onGiveUp('prompt');
-            return;
-          }
+          if (looksLikePermissionPrompt(this.ptys.readText(id, 2500)) || this.claudeStatus.waiting(id)) { giveUpOrWait(); return; }
+          if (!timeUp && Date.now() - this.ptys.lastOutputAt(id) <= 1800) { setTimeout(tick, 500); return; }   // 聞いているあいだに画面が動いた
           this.typeAndSubmit(id, text, true, (ok) => { if (onSent) onSent(ok); });
           if (onTyped) onTyped();
         });
@@ -389,8 +397,10 @@ class Hub extends EventEmitter {
   typeAndSubmit(id, text, enter = true, done) {
     const ok = this.ptys.write(id, toTerminalInput(text, false));
     if (!ok || !enter) { if (done) done(ok); return ok; }
-    // Claude Code 自身にも「答えを待っていないか」を聞いてから、Enter の直前に、もう一度、画面を見る
-    setTimeout(() => this.claudeStatus.refresh().then(() => {
+    // 文字を打った「あと」に、Claude Code 自身にも「答えを待っていないか」を聞き始める（間の 600ms と重ねる）。
+    // その答えを待ってから、Enter の直前に、もう一度、画面を見る
+    const fresh = this.claudeStatus.refresh(true).catch(() => {});
+    setTimeout(() => fresh.then(() => {
       if (!this.ptys.isRunning(id)) { if (done) done(false); return; }
       if (looksLikePermissionPrompt(this.ptys.readText(id, 2500)) || this.claudeStatus.waiting(id)) {
         const s = this.session(id);

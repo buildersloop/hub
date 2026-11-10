@@ -3,7 +3,7 @@
 // 取れないとき（古い Claude Code・時間切れ・読めない）や、一覧に無い会話（フォルダの信頼の確認の最中など）は「分からない」とし、
 // 画面の検出だけで判断する（いままでと同じ）。
 'use strict';
-const { spawn } = require('child_process');
+const { spawn, execFile } = require('child_process');
 
 // `claude agents --json` の出力を、会話の ID → { status, waitingFor } にする。読めなければ null。
 function parseAgents(out) {
@@ -19,51 +19,68 @@ function parseAgents(out) {
 const isWaiting = (e) => !!e && e.status === 'waiting';
 
 function killTree(p) {
-  try {
-    if (process.platform === 'win32') spawn('taskkill', ['/PID', String(p.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' });
-    else p.kill();
-  } catch { /* もう終わっている */ }
+  if (!p || !p.pid) return;
+  if (process.platform === 'win32') execFile('taskkill', ['/PID', String(p.pid), '/T', '/F'], { windowsHide: true }, () => {});
+  else { try { p.kill(); } catch { /* もう終わっている */ } }
 }
 
 class ClaudeStatus {
   // run(cb)：一覧を取り、出力の文字列（失敗は null）を cb に渡す。試験では、差し替える。
-  constructor({ env = process.env, ttlMs = 1000, timeoutMs = 4000, maxAgeMs = 15000, run } = {}) {
+  // onUnavailable()：はじめて取れなかったときに 1 回だけ呼ぶ（記録用）。
+  constructor({ env = process.env, ttlMs = 1000, timeoutMs = 4000, maxAgeMs = 15000, run, onUnavailable } = {}) {
     this.env = env;
     this.ttlMs = ttlMs;          // この間は、取り直さない（続けて呼ばれても、1 回だけ動かす）
     this.timeoutMs = timeoutMs;
     this.maxAgeMs = maxAgeMs;    // これより古い情報は使わない
+    this.onUnavailable = onUnavailable;
     this.map = null;
-    this.at = 0;
+    this.at = 0;                 // いまの情報を取り終えた時刻
+    this.seq = 0;                // 取りに行った回数（古い結果で、新しい結果を上書きしない）
+    this.applied = 0;
     this.pending = null;
+    this.pendingStart = 0;
+    this._warned = false;
     this._run = run || ((cb) => this._exec(cb));
   }
   _exec(cb) {
     const win = process.platform === 'win32';
     // 会話を起動するときと同じく、PATH の claude を使う。引数は固定（外からの値を入れない）。
+    // cmd が、今のフォルダの claude.cmd などを PATH より先に探さないようにする。
+    const env = win ? { ...this.env, NoDefaultCurrentDirectoryInExePath: '1' } : this.env;
     const p = spawn(win ? (process.env.ComSpec || 'cmd.exe') : '/bin/sh', win ? ['/d', '/c', 'claude agents --json'] : ['-c', 'claude agents --json'],
-      { env: this.env, windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] });
+      { env, windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] });
     let out = '';
     let done = false;
     let timer = null;
     const finish = (v) => { if (done) return; done = true; clearTimeout(timer); cb(v); };
     timer = setTimeout(() => { killTree(p); finish(null); }, this.timeoutMs);
+    if (!p.stdout) { killTree(p); finish(null); return; }
     p.stdout.on('data', (d) => { out += d; if (out.length > 2e6) { killTree(p); finish(null); } });
     p.on('error', () => finish(null));
     p.on('close', (code) => finish(code === 0 ? out : null));
   }
-  // 一覧を取り直す（失敗しても reject しない）
-  refresh() {
-    if (Date.now() - this.at < this.ttlMs) return Promise.resolve();
-    if (this.pending) return this.pending;
-    this.pending = new Promise((resolve) => {
-      this._run((out) => {
-        this.map = out == null ? null : parseAgents(out);
-        this.at = Date.now();
-        this.pending = null;
-        resolve();
-      });
-    });
-    return this.pending;
+  // 一覧を取り直す（失敗しても reject しない）。force：いまから取りに行った結果を待つ（直前の Enter の見直し用）
+  refresh(force = false) {
+    const now = Date.now();
+    if (!force && now - this.at < this.ttlMs) return Promise.resolve();
+    if (this.pending && (!force || this.pendingStart >= now)) return this.pending;
+    const seq = ++this.seq;
+    let resolveRun;
+    const run = new Promise((resolve) => { resolveRun = resolve; });
+    let settled = false;
+    const done = (out) => {
+      if (settled) return;
+      settled = true;
+      const m = out == null ? null : parseAgents(out);
+      if (seq > this.applied) { this.applied = seq; this.map = m; this.at = Date.now(); }
+      if (!m && !this._warned) { this._warned = true; try { if (this.onUnavailable) this.onUnavailable(); } catch { /* 記録の失敗は無視 */ } }
+      if (this.pending === run) this.pending = null;
+      resolveRun();
+    };
+    this.pending = run;
+    this.pendingStart = now;
+    try { this._run(done); } catch { done(null); }   // 同期の例外（起動できない等）も「取れない」として扱う
+    return run;
   }
   // true：Claude Code が「この会話は、人の答えを待っている」と知らせている（新しい情報のときだけ）
   waiting(sessionId) {

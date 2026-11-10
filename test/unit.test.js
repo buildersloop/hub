@@ -104,8 +104,16 @@ check('画面を消したあと（ESC[2J・別の画面への切り替え）は�
   assert.strictEqual(looksLikePermissionPrompt(stripAnsi(raw)), true, '消す前の文字も読むと、確認ありに見える');
   assert.strictEqual(looksLikePermissionPrompt(stripAnsi(afterLastClear(raw))), false, '消したあとだけを読む');
   assert.strictEqual(afterLastClear('abc'), 'abc', '消す制御が無ければ、そのまま');
-  assert.strictEqual(afterLastClear('a\x1b[2Jb\x1b[3Jc'), 'c', '最後のものより後');
+  assert.strictEqual(afterLastClear('a\x1b[2Jb\x1b[?1049hc'), 'c', '最後のものより後');
   assert.strictEqual(looksLikePermissionPrompt(stripAnsi(afterLastClear('old\x1b[2J' + TRUST_RAW))), true, '消したあとに描かれた確認は、見つける');
+  assert.strictEqual(looksLikePermissionPrompt(stripAnsi(afterLastClear(TRUST_RAW + '\x1b[3J'))), true, 'ESC[3J（さかのぼりの記録だけを消す）は、切れ目にしない');
+  assert.strictEqual(looksLikePermissionPrompt(stripAnsi(afterLastClear(TRUST_RAW + '\x1b[?1049h\x1b[2J別の画面\x1b[?1049l'))), true, '元の画面へ戻ったら、消す前の画面も読む');
+});
+check('確認の検出：ふつうの英語の文に、誤って当たらない', () => {
+  for (const s of ['Please ask the data center to confirm the address.', 'Would you like to continue with the refactor?', 'presenter to confirm']) {
+    assert.strictEqual(looksLikePermissionPrompt(s), false, s);
+  }
+  assert.strictEqual(looksLikePermissionPrompt('Overwrite?(y/n)'), true, '空白の無い型は、空白を抜いた形にも当てる');
 });
 check('確認の語：空白を抜いた形でも、エージェントの文から見つける（言い換えた日本語は通す）', () => {
   const { permissionWordsIn } = require('../src/guard');
@@ -956,6 +964,27 @@ const checkAsync = async (name, fn) => { try { await fn(); pass++; console.log('
     await st.refresh();
     assert.strictEqual(runs, 2);
     assert.strictEqual(st.waiting('s1'), false);
+    // force：少しの間でも、いまから取り直す（Enter の直前の見直し用）
+    out = JSON.stringify([{ sessionId: 's1', status: 'waiting' }]);
+    await st.refresh(true);
+    assert.strictEqual(runs, 3);
+    assert.strictEqual(st.waiting('s1'), true);
+  });
+  await checkAsync('Claude Code の会話の状態：取りに行く処理が例外を投げても、止まらずに「取れない」とし、知らせは 1 回だけ', async () => {
+    const { ClaudeStatus } = require('../src/claude-status');
+    let mode = 'throw';
+    let warned = 0;
+    const st = new ClaudeStatus({ ttlMs: 0, onUnavailable: () => { warned++; }, run: (cb) => { if (mode === 'throw') throw new Error('spawn EMFILE'); cb(mode === 'sync' ? '[{"sessionId":"x","status":"waiting"}]' : null); } });
+    await st.refresh();
+    await st.refresh();
+    assert.strictEqual(st.waiting('x'), false);
+    assert.strictEqual(warned, 1, '知らせは 1 回だけ');
+    mode = 'sync';   // すぐに（同期で）答えが返る場合も、次の取り直しが止まらない
+    await st.refresh();
+    assert.strictEqual(st.waiting('x'), true);
+    mode = 'null';
+    await st.refresh();
+    assert.strictEqual(st.waiting('x'), false, 'また取り直せる');
   });
   await checkAsync('Claude Code が「答えを待っている」あいだは、画面に確認の語が無くても、エージェントから Enter・文字・キーを送らない', async () => {
     const { hub, ptys, waitingIds } = mkHub();
