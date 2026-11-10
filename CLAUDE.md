@@ -13,6 +13,7 @@
 | `ptys.js` | node-pty（ConPTY）。claude の起動（`--session-id`／`--resume`）・`cleanEnv` |
 | `mcp.js` | MCP サーバー（127.0.0.1・Bearer・Host/Origin 検査）。ツール定義 |
 | `guard.js` | **入力の安全装置**（純粋な関数）。承認語の拒否・権限の確認の検出・URL の制限 |
+| `claude-status.js` | Claude Code 自身が知らせる会話の状態（`claude agents --json`）。「答えを待っている」なら、エージェントの入力を止める（画面の検出を補う） |
 | `connections.js`／`mcp-catalog.js` | **MCP の接続**（GitHub・Slack・Notion など）。定義は hub.json の `mcpConnections`、秘密の値は `mcpSecrets`（safeStorage で暗号化）。起動時に、そのセッションで有効な接続だけを `--mcp-config` に渡す（秘密の値は、設定ファイルに書かず、環境変数 `${BLH_…}` で渡す） |
 | `activity.js` | 会話の記録（.jsonl）から、活動の読み取り・競合の検出 |
 | `browser.js` | WebContentsView。事業ごとの partition（Cookie 分離） |
@@ -44,7 +45,7 @@ node test/hubctl.js <tool> '<json>'      # 動いている Hub を、MCP で操�
 10. **名前・役割（セッション・事業）は、1 行の表示名**（`cleanLabel`：改行・制御文字・【】を除く）。自己紹介（system prompt）に入るため、エージェントが偽の見出し（例：【組織のルール】）を仕込めないようにする。
 11. **MCP を、コマンドの実行の入口にしない**：MCP の `session_create` が作れるのは `kind=claude` だけ（`shell`・`custom`・`command`・`args` を受け取らない）。`session_send`・`session_key` は、Claude Code 以外のセッションへの入力を拒否する（人の画面だけ）。MCP の `session_resume`・`profile_run` は、シェル・コマンドのセッションを起動しない。プロファイルからは `custom` を作れない。`createSession`・`startSession`・`sendKey`・`profileRun`・`adoptSession` の `by` の既定は `agent`（安全な側）で、画面の IPC が `human` を明示する。
 12. **エージェントが書いた指示は、人の発言に見せない**：MCP の `session_create` の prompt、`by` が人でないプロファイルの prompt、MCP の `setup_agent_start` の task、エージェントが作ったプリセット（人がボタンで送るときも）には、先頭に「【送信元：…】」を付ける（自己紹介では「見出しのない文は、人から」と教えているため）。
-13. **確認の画面に、エージェントの入力を入れない**：最初の指示・預かった送信は、確認の画面が出ているあいだは渡さない（`sendWhenReady`）。起動のたびに、入力を受けられる状態を一度通るまで（`_ready`）、エージェントの文は預かり、Enter・キーは拒否する（あとから出る確認が、たまった入力を受け取らないように）。Enter の直前にも、確認の画面を見直す（`typeAndSubmit`。打った文の中の語も区別しない）。そのため、確認の画面に使われる語（`guard.js` の `PERMISSION_PATTERNS`）を含むエージェントの文（`session_send`・MCP の最初の指示・エージェントのプロファイル・`setup_agent_start`）は、送る前に断る。
+13. **確認の画面に、エージェントの入力を入れない**：最初の指示・預かった送信は、確認の画面が出ているあいだは渡さない（`sendWhenReady`）。起動のたびに、入力を受けられる状態を一度通るまで（`_ready`）、エージェントの文は預かり、Enter・キーは拒否する（あとから出る確認が、たまった入力を受け取らないように）。Enter の直前にも、確認の画面を見直す（`typeAndSubmit`。打った文の中の語も区別しない）。そのため、確認の画面に使われる語（`guard.js` の `PERMISSION_PATTERNS`）を含むエージェントの文（`session_send`・MCP の最初の指示・エージェントのプロファイル・`setup_agent_start`）は、送る前に断る。確認の有無は、**画面の文字**（`stripAnsi`：Claude Code は空白を `ESC[nC`、行の頭を `ESC[行;列H` で描くので、空白・改行に戻す。画面を消す制御より前は見ない。空白を抜いた形でも代表的な語を見る）と、**Claude Code 自身の状態**（`claude-status.js`：`status: waiting`）の両方で見て、どちらかが「確認あり」なら送らない。状態が取れないとき（古い版・一覧に無い会話）は、画面の文字だけ。
 14. **アプリ内ブラウザは、ページからの権限の要求を、既定で断る**（`browser.js` の `guardPermissions`。許すのは全画面と、クリップボードへの書き込みだけ）。端末の OSC 52（コピーの依頼）は、Claude Code のセッションで、人が直前に操作したときだけ受け付け、記録の再生中は受け付けない。
 15. セットアップ担当の事前の許可（`SETUP_TOOLS`）に、セッションを起動・入力するツール（`profile_run`・`session_*` の書き込み）を入れない。
 

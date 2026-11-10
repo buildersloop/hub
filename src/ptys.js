@@ -5,7 +5,7 @@ const fs = require('fs');
 const path = require('path');
 const { execFile } = require('child_process');
 const { EventEmitter } = require('events');
-const { stripAnsi } = require('./guard');
+const { stripAnsi, afterLastClear } = require('./guard');
 
 const BUF_MAX = 400 * 1024;
 const encodeCwd = (cwd) => cwd.replace(/[^a-zA-Z0-9]/g, '-');   // Claude Code が会話の記録を置く場所の規則
@@ -71,7 +71,7 @@ class PtyManager extends EventEmitter {
   readText(id, maxChars = 6000) {
     const r = this.map.get(id);
     if (!r) return '';
-    const t = stripAnsi(r.buf).split('\n').map((l) => l.replace(/\s+$/g, '')).join('\n').replace(/\n{3,}/g, '\n\n');
+    const t = stripAnsi(afterLastClear(r.buf)).split('\n').map((l) => l.replace(/\s+$/g, '')).join('\n').replace(/\n{3,}/g, '\n\n');
     return t.slice(-maxChars);
   }
   lastOutputAt(id) { const r = this.map.get(id); return r ? r.lastOutputAt : 0; }

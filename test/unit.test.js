@@ -69,6 +69,66 @@ check('権限の確認の検出：出ているときは true', () => {
 check('権限の確認の検出：通常の画面は false', () => {
   for (const s of ['❯ docs/reply-playbook.md に従って', '● 候補を探しています…\n  ⎿  Read 3 files', 'PS C:\\> echo hi', '']) assert.strictEqual(looksLikePermissionPrompt(s), false, s.slice(0, 30));
 });
+// 本物の Claude Code（2.1 系）の描き方：空白を「カーソルを右へ」（ESC[nC）、行の頭を「位置の指定」（ESC[行;列H）で描く
+const C1 = '\x1b[1C';
+const TRUST_RAW = '\x1b[1m\x1b[3;2HAccessing' + C1 + 'workspace:\x1b[m\x1b[8;2HQuick' + C1 + 'safety' + C1 + 'check:' +
+  '\x1b[38;2;87;105;247m\x1b[15;2H❯' + C1 + 'No,' + C1 + 'exit\x1b[m\x1b[16;4HYes,' + C1 + 'I' + C1 + 'trust' + C1 + 'this' + C1 + 'folder' +
+  '\x1b[38;2;102;102;102m\x1b[18;2HEnter' + C1 + 'to' + C1 + 'confirm' + C1 + '·' + C1 + 'Esc' + C1 + 'to' + C1 + 'cancel';
+// 権限の確認。見出し（Do you want to …）が、描き直しで、末尾に入らなかった場合。選択肢の「1.」の点も抜けている
+const PERM_RAW = '\x1b[20;2H❯' + C1 + '1\x1b[2CYes\x1b[21;4H2.' + C1 + 'Yes,' + C1 + 'and' + C1 + 'switch' + C1 + 'to' + C1 + 'accept' + C1 + 'edits' +
+  '\x1b[22;4H3.' + C1 + 'No\x1b[24;2HEsc' + C1 + 'to' + C1 + 'cancel' + C1 + '·' + C1 + 'Tab' + C1 + 'to' + C1 + 'amend';
+check('画面の文字：「カーソルを右へ」は空白に、「位置の指定」は改行に戻す（語がつながらない）', () => {
+  assert.strictEqual(stripAnsi('Esc' + C1 + 'to' + C1 + 'cancel'), 'Esc to cancel');
+  assert.strictEqual(stripAnsi('a\x1b[3Cb'), 'a   b');
+  assert.strictEqual(stripAnsi('a\x1b[Cb'), 'a b', '数の無い ESC[C は 1 つ');
+  assert.strictEqual(stripAnsi('a\x1b[5;2Hb\x1b[Hc'), 'a\nb\nc');
+  assert.strictEqual(stripAnsi('x\x1b[>0qy\x1b[?2004hz'), 'xyz', '「>」「?」つきの制御も消す');
+  assert.strictEqual(stripAnsi('a\x1b[99999Cb').length, 302, '大きな数でも、長くしすぎない');
+  assert.ok(stripAnsi(TRUST_RAW).includes('Yes, I trust this folder'));
+});
+check('権限の確認の検出：本物の描き方（空白が制御の文字）でも見つける', () => {
+  assert.strictEqual(looksLikePermissionPrompt(stripAnsi(TRUST_RAW)), true, 'フォルダの信頼の確認');
+  assert.strictEqual(looksLikePermissionPrompt(stripAnsi(PERM_RAW)), true, '権限の確認（見出しなし）');
+  // 空白が全部抜けても（描き直しで文字が抜けた場合の備え）
+  assert.strictEqual(looksLikePermissionPrompt('❯No,exitYes,ItrustthisfolderEntertoconfirm·Esctocancel'), true);
+  assert.strictEqual(looksLikePermissionPrompt('Doyouwanttocreatea.txt?❯1Yes2.Yes'), true);
+  assert.strictEqual(looksLikePermissionPrompt('Would you like to proceed?\n❯ 1. Yes, and auto-accept edits'), true, '計画の承認');
+  // 通常の画面（入力待ち・考え中）は、確認ではない
+  for (const s of ['⏸ manual mode on · ? for shortcuts · ← for agents', '✻ Thinking… (esc to interrupt)', '>  Try "how do I log an error?"']) {
+    assert.strictEqual(looksLikePermissionPrompt(s), false, s);
+  }
+});
+check('画面を消したあと（ESC[2J・別の画面への切り替え）は、それより前の、答え終わった確認を見ない', () => {
+  const { afterLastClear } = require('../src/guard');
+  const raw = TRUST_RAW + '\x1b[?2004l\x1b]0;Claude Code\x07\x1b[?1049h\x1b[2J\x1b[H\x1b[K\r\n> ' + C1 + 'Try' + C1 + 'something\r\n? for shortcuts';
+  assert.strictEqual(looksLikePermissionPrompt(stripAnsi(raw)), true, '消す前の文字も読むと、確認ありに見える');
+  assert.strictEqual(looksLikePermissionPrompt(stripAnsi(afterLastClear(raw))), false, '消したあとだけを読む');
+  assert.strictEqual(afterLastClear('abc'), 'abc', '消す制御が無ければ、そのまま');
+  assert.strictEqual(afterLastClear('a\x1b[2Jb\x1b[3Jc'), 'c', '最後のものより後');
+  assert.strictEqual(looksLikePermissionPrompt(stripAnsi(afterLastClear('old\x1b[2J' + TRUST_RAW))), true, '消したあとに描かれた確認は、見つける');
+});
+check('確認の語：空白を抜いた形でも、エージェントの文から見つける（言い換えた日本語は通す）', () => {
+  const { permissionWordsIn } = require('../src/guard');
+  assert.ok(permissionWordsIn('Esctocancel'));
+  assert.ok(permissionWordsIn('Esc   to  cancel'));
+  assert.ok(permissionWordsIn('yes, I trust this folder'));
+  assert.strictEqual(permissionWordsIn('Write-Output ("Do you want to pro" + "ceed?")'), '', '動詞が無ければ、確認の見出しとは見なさない');
+  assert.strictEqual(permissionWordsIn('フォルダの信頼の確認を点検して'), '');
+});
+check('Claude Code の会話の状態（claude agents --json）を読む', () => {
+  const { parseAgents, isWaiting } = require('../src/claude-status');
+  const m = parseAgents(JSON.stringify([
+    { pid: 1, sessionId: 'a', status: 'waiting', waitingFor: 'permission prompt' },
+    { pid: 2, sessionId: 'b', status: 'idle' },
+    { pid: 3, status: 'busy' },
+  ]));
+  assert.strictEqual(m.size, 2);
+  assert.deepStrictEqual(m.get('a'), { status: 'waiting', waitingFor: 'permission prompt' });
+  assert.strictEqual(isWaiting(m.get('a')), true);
+  assert.strictEqual(isWaiting(m.get('b')), false);
+  assert.strictEqual(isWaiting(m.get('zz')), false, '一覧に無い会話は、待っているとは言わない（画面の検出に任せる）');
+  for (const bad of ['', 'error: unknown option', '{"a":1}', 'null']) assert.strictEqual(parseAgents(bad), null, bad);
+});
 check('キーの一覧：shift-tab を含まない・Enter は \\r', () => {
   assert.strictEqual(KEYS.enter, '\r');
   assert.ok(!('shift-tab' in KEYS) && !('shift+tab' in KEYS));
@@ -148,8 +208,11 @@ function mkHub(prefix = 'hubcfg-') {
   ptys.start = (s) => running.add(s.id);
   ptys.isRunning = (id) => running.has(id);
   ptys.stop = (id) => running.delete(id);
-  const hub = new Hub({ store, ptys, getBrowser: () => null, getWindow: () => null });
-  return { hub, store, ptys, dir: d };
+  // Claude Code の「答えを待っている」の代用品（本物の claude を呼ばない）。waitingIds に入れた会話が、待っている
+  const waitingIds = new Set();
+  const claudeStatus = { refresh: () => Promise.resolve(), waiting: (id) => waitingIds.has(id) };
+  const hub = new Hub({ store, ptys, getBrowser: () => null, getWindow: () => null, claudeStatus });
+  return { hub, store, ptys, dir: d, waitingIds };
 }
 check('設定：事業の追加・更新（不正な id・存在しないフォルダは拒否）', () => {
   const { hub, dir } = mkHub();
@@ -874,6 +937,64 @@ const checkAsync = async (name, fn) => { try { await fn(); pass++; console.log('
     await new Promise((r) => setTimeout(r, 4800));
     assert.strictEqual(sent, true);
     assert.ok(writes.some((d) => d.includes('こんにちは')));
+  });
+  await checkAsync('Claude Code の会話の状態：続けて聞いても 1 回だけ取る・取れないときは「待っていない」（画面の検出に任せる）', async () => {
+    const { ClaudeStatus } = require('../src/claude-status');
+    let runs = 0;
+    let out = JSON.stringify([{ sessionId: 's1', status: 'waiting', waitingFor: 'permission prompt' }]);
+    const st = new ClaudeStatus({ ttlMs: 200, maxAgeMs: 600, run: (cb) => { runs++; setTimeout(() => cb(out), 20); } });
+    assert.strictEqual(st.waiting('s1'), false, 'まだ取っていない');
+    await Promise.all([st.refresh(), st.refresh(), st.refresh()]);
+    assert.strictEqual(runs, 1, '同時の呼び出しは、まとめる');
+    assert.strictEqual(st.waiting('s1'), true);
+    assert.strictEqual(st.waiting('s2'), false);
+    await st.refresh();
+    assert.strictEqual(runs, 1, '少しの間は、取り直さない');
+    await new Promise((r) => setTimeout(r, 700));
+    assert.strictEqual(st.waiting('s1'), false, '古い情報は使わない');
+    out = null;   // 取れない（古い Claude Code・時間切れ）
+    await st.refresh();
+    assert.strictEqual(runs, 2);
+    assert.strictEqual(st.waiting('s1'), false);
+  });
+  await checkAsync('Claude Code が「答えを待っている」あいだは、画面に確認の語が無くても、エージェントから Enter・文字・キーを送らない', async () => {
+    const { hub, ptys, waitingIds } = mkHub();
+    const writes = [];
+    ptys.write = (id, d) => { writes.push(d); return true; };
+    ptys.snapshot = () => 'x'.repeat(300);
+    ptys.lastOutputAt = () => Date.now() - 5000;
+    ptys.readText = () => '> ';   // 画面の文字では、確認は見つからない
+    const s = hub.createSession({ by: 'human', businessId: 'hub', name: 'W', start: true });
+    hub._markReady(s.id);
+    waitingIds.add(s.id);
+    assert.throws(() => hub.sendFromAgent(s.id, '続けてください'), /答えを待って/);
+    assert.throws(() => hub.sendFromAgent(s.id, ''), /答えを待って/, 'Enter だけも');
+    assert.throws(() => hub.sendKey(s.id, 'enter', 1, 'agent'), /答えを待って/);
+    assert.throws(() => hub.sendKey(s.id, 'down', 1, 'agent'), /答えを待って/);
+    assert.strictEqual(hub.sendKey(s.id, 'escape', 1, 'agent'), true, '取り消し（Esc）は送れる');
+    assert.strictEqual(hub.sendKey(s.id, 'enter', 1, 'human'), true, '人の画面のボタンは、これまでどおり');
+    writes.length = 0;
+    // 預かった送信・最初の指示も、待っているあいだは渡さない
+    let sent = false;
+    let gaveUp = null;
+    hub.sendWhenReady(s.id, 'こんにちは', { timeoutMs: 200, onSent: () => { sent = true; }, onGiveUp: (w) => { gaveUp = w; } });
+    await new Promise((r) => setTimeout(r, 2600));
+    assert.strictEqual(gaveUp, 'prompt');
+    assert.strictEqual(sent, false);
+    assert.strictEqual(writes.length, 0, '何も打たない');
+    // 文字を打ったあと、Enter の直前に待ちになったら、Enter を控える
+    waitingIds.delete(s.id);
+    let ok = null;
+    hub.typeAndSubmit(s.id, 'echo', true, (v) => { ok = v; });
+    waitingIds.add(s.id);
+    await new Promise((r) => setTimeout(r, 900));
+    assert.strictEqual(ok, false);
+    assert.ok(!writes.includes('\r'), 'Enter を送らない');
+    // 待ちが終われば、送れる
+    waitingIds.delete(s.id);
+    hub.sendFromAgent(s.id, '続けてください');
+    await new Promise((r) => setTimeout(r, 900));
+    assert.ok(writes.includes('\r'), 'Enter を送る');
   });
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
