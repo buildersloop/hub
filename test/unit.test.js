@@ -822,6 +822,33 @@ check('保存：「無い」以外の読み込みの失敗では、新しく始�
   assert.throws(() => new Store(f, def, { workRoot: path.join(d, 'w') }), /読めませんでした/);
   assert.ok(fs.statSync(f).isDirectory(), '元のものは、そのまま');
 });
+check('版の主な変更：CHANGELOG の節から、太字の項目を取り出して 1 行にする', () => {
+  const { versionSection, versionHighlights, versionNotice } = require('../src/changelog');
+  const md = [
+    '# 変更の記録', '',
+    '## V10（10.0.0）', '- **十番目。**', '',
+    '## V1（1.0.0）— 最初', '**大きな変更**', '- **一つ目を足した。**', '- ふつうの行', '- **二つ目：**', '  - **入れ子も拾う**',
+    '- **' + 'あ'.repeat(50) + '**', '', '**入れ替えるとき（V0 から）**', '- 注意', '',
+    '## V0', '- **古い**',
+  ].join('\r\n');
+  assert.ok(versionSection(md, 'V1').startsWith('## V1（1.0.0）'), 'V1 の節');
+  assert.ok(!versionSection(md, 'V1').includes('十番目') && !versionSection(md, 'V1').includes('古い'), 'V10・次の節を含めない');
+  assert.strictEqual(versionSection(md, 'V2'), '');
+  assert.strictEqual(versionSection(md, ''), '');
+  const h = versionHighlights(md, 'V1');
+  assert.deepStrictEqual(h.slice(0, 3), ['一つ目を足した', '二つ目', '入れ子も拾う'], '小見出し（大きな変更）は項目にしない・末尾の句読点を除く');
+  assert.strictEqual(h[3], 'あ'.repeat(40) + '…', '長い項目は切る');
+  const n = versionNotice(md, 'V1');
+  assert.strictEqual(n, 'V1 の主な変更：一つ目を足した／二つ目／入れ子も拾う（ほか 1 件）。くわしくは CHANGELOG.md を見てください。「入れ替えるとき」の注意もあります。');
+  assert.strictEqual(versionNotice(md, 'V0'), 'V0 の主な変更：古い。くわしくは CHANGELOG.md を見てください。', '注意が無い版');
+  assert.strictEqual(versionNotice(md, 'V9'), '', '節が無ければ出さない');
+  assert.strictEqual(versionNotice('', 'V1'), '');
+  // 同梱の CHANGELOG.md と、いまの版で、お知らせが作れる（書き方が変わって、黙って出なくなるのを防ぐ）
+  const root = path.join(__dirname, '..');
+  const ver = require('../package.json').hubVersion;
+  const real = fs.readFileSync(path.join(root, 'CHANGELOG.md'), 'utf8');
+  if (versionSection(real, ver)) assert.ok(versionNotice(real, ver).startsWith(ver + ' の主な変更：'), '同梱の CHANGELOG.md から作れる');
+});
 
 // ---- 時間を使う試験（タイマーを待つ）
 const checkAsync = async (name, fn) => { try { await fn(); pass++; console.log('PASS ' + name); } catch (e) { fail++; console.log('FAIL ' + name + '  [' + e.message + ']'); } };

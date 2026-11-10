@@ -71,6 +71,13 @@ if (firstRun) {
   if (inheritError) startupNotices.push(inheritError + '（新しく始めました）');
   const reset = store.data.settings.secretsReset || [];
   if (reset.length) startupNotices.push(`MCP の接続の秘密の値は、この版では読めないため、消しました。「接続」で入れ直してください：${reset.join('、')}`);
+  // 前の版から入れ替えたときだけ、この版の主な変更（同梱の CHANGELOG.md）を 1 行で知らせる。読めなければ、出さない。
+  if (inheritedFrom) {
+    try {
+      const m = require('./changelog').versionNotice(fs.readFileSync(path.join(__dirname, '..', 'CHANGELOG.md'), 'utf8'), VER);
+      if (m) startupNotices.push(m);
+    } catch { /* CHANGELOG.md が無い：お知らせを出さないだけ */ }
+  }
   for (const m of startupNotices) hub.audit('Hub', 'version', m);
 }
 hub.on('notice', (m) => send('ui:notice', m));
