@@ -843,11 +843,16 @@ check('版の主な変更：CHANGELOG の節から、太字の項目を取り出
   assert.strictEqual(versionNotice(md, 'V0'), 'V0 の主な変更：古い。くわしくは CHANGELOG.md を見てください。', '注意が無い版');
   assert.strictEqual(versionNotice(md, 'V9'), '', '節が無ければ出さない');
   assert.strictEqual(versionNotice('', 'V1'), '');
-  // 同梱の CHANGELOG.md と、いまの版で、お知らせが作れる（書き方が変わって、黙って出なくなるのを防ぐ）
-  const root = path.join(__dirname, '..');
+});
+check('同梱の CHANGELOG.md に、いまの版（hubVersion）の節と、太字の主な変更がある', () => {
+  // 版を上げて、CHANGELOG の節を書き忘れると、起動時のお知らせが黙って出なくなる。それを、ここで落として気づく。
+  const { versionSection, versionHighlights, versionNotice } = require('../src/changelog');
   const ver = require('../package.json').hubVersion;
-  const real = fs.readFileSync(path.join(root, 'CHANGELOG.md'), 'utf8');
-  if (versionSection(real, ver)) assert.ok(versionNotice(real, ver).startsWith(ver + ' の主な変更：'), '同梱の CHANGELOG.md から作れる');
+  const real = fs.readFileSync(path.join(__dirname, '..', 'CHANGELOG.md'), 'utf8');
+  assert.ok(ver, 'package.json に hubVersion がある');
+  assert.ok(versionSection(real, ver), `CHANGELOG.md に「## ${ver}（…）」の節を書いてください（docs/RELEASING.md の「版の準備」）`);
+  assert.ok(versionHighlights(real, ver).length > 0, `CHANGELOG.md の ${ver} の節に、「- **主な変更**」の形の項目を 1 つ以上書いてください（起動時のお知らせに使います）`);
+  assert.ok(versionNotice(real, ver).startsWith(ver + ' の主な変更：'), '同梱の CHANGELOG.md から、お知らせが作れる');
 });
 
 // ---- 時間を使う試験（タイマーを待つ）
