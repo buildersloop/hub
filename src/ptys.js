@@ -8,6 +8,12 @@ const { EventEmitter } = require('events');
 const { stripAnsi } = require('./guard');
 
 const BUF_MAX = 400 * 1024;
+// 子のプロセス（cmd・claude）は、作業フォルダにある同じ名前のファイル（claude.cmd など）を拾わない。
+// cmd は、名前だけのコマンドを、PATH より先に、いまのフォルダから探すため。この変数があると、いまのフォルダを探さない。
+const childEnv = (env) => (process.platform === 'win32' ? { ...env, NoDefaultCurrentDirectoryInExePath: '1' } : env);
+// Windows の道具（cmd・PowerShell・taskkill）は、Windows のフォルダの絶対パスで起動する（どのフォルダの同名のファイルも拾わない）
+const SYS32 = path.join(process.env.SystemRoot || process.env.windir || 'C:\\Windows', 'System32');
+const sysTool = (rel, fallback) => { const p = path.join(SYS32, rel); return fs.existsSync(p) ? p : fallback; };
 const encodeCwd = (cwd) => cwd.replace(/[^a-zA-Z0-9]/g, '-');   // Claude Code が会話の記録を置く場所の規則
 
 // 親の Claude Code のセッションが持つ環境変数を、子に渡さない。渡すと、子が「子セッション」と見なされ、
@@ -41,9 +47,10 @@ class PtyManager extends EventEmitter {
   start(sess, { cols = 120, rows = 32, claudeArgs = [], extraEnv = {} } = {}) {
     if (this.isRunning(sess.id)) return;
     // extraEnv：MCP の接続の秘密の値（このセッションだけに渡す。設定ファイルには書かない）
-    const env = { ...cleanEnv(process.env), TERM: 'xterm-256color', COLORTERM: 'truecolor', ...extraEnv, BL_HUB_SESSION: sess.id };
+    const env = childEnv({ ...cleanEnv(process.env), TERM: 'xterm-256color', COLORTERM: 'truecolor', ...extraEnv, BL_HUB_SESSION: sess.id });
     const cmd = this.commandFor(sess, claudeArgs);
-    const file = cmd ? (process.env.ComSpec || 'cmd.exe') : 'powershell.exe';
+    const comspec = process.env.ComSpec && path.isAbsolute(process.env.ComSpec) ? process.env.ComSpec : sysTool('cmd.exe', 'cmd.exe');
+    const file = cmd ? comspec : sysTool(path.join('WindowsPowerShell', 'v1.0', 'powershell.exe'), 'powershell.exe');
     const args = cmd ? ['/d', '/c', cmd] : ['-NoLogo'];
     const cwd = fs.existsSync(sess.cwd) ? sess.cwd : os.homedir();
     const p = pty.spawn(file, args, { name: 'xterm-256color', cols, rows, cwd, env });
@@ -82,7 +89,7 @@ class PtyManager extends EventEmitter {
     if (!r || r.exited) return;
     const pid = r.pty.pid;
     // claude が起こした子プロセスも、まとめて終了（pty.kill() は、Windows で、コンソール一覧の取得に失敗してログが荒れるため、最後の手段にする）
-    if (pid) execFile('taskkill', ['/PID', String(pid), '/T', '/F'], () => {});
+    if (pid) execFile(sysTool('taskkill.exe', 'taskkill'), ['/PID', String(pid), '/T', '/F'], () => {});
     setTimeout(() => { if (!r.exited) { try { r.pty.kill(); } catch { /* 既に終了 */ } } }, 3000).unref();
   }
   stopAll() { for (const id of this.map.keys()) this.stop(id); }

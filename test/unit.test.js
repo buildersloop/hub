@@ -850,6 +850,38 @@ check('版の主な変更：CHANGELOG の節から、太字の項目を取り出
   if (versionSection(real, ver)) assert.ok(versionNotice(real, ver).startsWith(ver + ' の主な変更：'), '同梱の CHANGELOG.md から作れる');
 });
 
+// ---- 子のプロセスの起動：作業フォルダにある同じ名前のファイルを拾わない
+check('子のプロセス：Claude Code の起動に「いまのフォルダを探さない」を付け、cmd・PowerShell は絶対パスで起動する（作業フォルダの claude.cmd を動かさない）', () => {
+  if (process.platform !== 'win32') return;
+  const { spawnSync } = require('child_process');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hubchild-'));
+  const name = 'hubprobe' + process.pid;
+  fs.writeFileSync(path.join(dir, name + '.cmd'), '@echo HUB-PROBE-RAN\r\n');
+  const base = { ...process.env };
+  delete base.NoDefaultCurrentDirectoryInExePath;
+  const run = (env) => spawnSync(process.env.ComSpec || 'cmd.exe', ['/d', '/c', name], { cwd: dir, env, encoding: 'utf8', windowsHide: true }).stdout || '';
+  assert.ok(run(base).includes('HUB-PROBE-RAN'), '（確かめ）変数が無いと、cmd は、いまのフォルダのファイルを動かす');
+  assert.ok(!run({ ...base, NoDefaultCurrentDirectoryInExePath: '1' }).includes('HUB-PROBE-RAN'), '変数があれば、動かさない');
+  // PtyManager が、その変数と、絶対パスで起動する
+  const nodePty = require('node-pty');
+  const orig = nodePty.spawn;
+  const seen = [];
+  nodePty.spawn = (file, args, opts) => { seen.push({ file, args, opts }); return { pid: 0, onData() {}, onExit() {}, write() {}, kill() {} }; };
+  try {
+    const pm = new PtyManager();
+    pm.hasConversation = () => false;
+    pm.start({ id: 'c1', kind: 'claude', cwd: dir, args: [] });
+    pm.start({ id: 's1', kind: 'shell', cwd: dir, args: [] });
+  } finally { nodePty.spawn = orig; }
+  for (const x of seen) {
+    assert.strictEqual(x.opts.env.NoDefaultCurrentDirectoryInExePath, '1');
+    assert.ok(path.isAbsolute(x.file), '絶対パスで起動：' + x.file);
+  }
+  assert.ok(/claude --session-id c1/.test(seen[0].args.join(' ')));
+  const src = fs.readFileSync(path.join(__dirname, '..', 'src', 'ptys.js'), 'utf8');
+  assert.ok(/execFile\(sysTool\('taskkill\.exe'/.test(src), 'taskkill も、絶対パスで');
+});
+
 // ---- 時間を使う試験（タイマーを待つ）
 const checkAsync = async (name, fn) => { try { await fn(); pass++; console.log('PASS ' + name); } catch (e) { fail++; console.log('FAIL ' + name + '  [' + e.message + ']'); } };
 (async () => {
