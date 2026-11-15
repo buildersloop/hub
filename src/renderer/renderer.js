@@ -367,7 +367,7 @@ async function openBizManager(bid) {
   const dirs = cur.dirs || [{ label: '作業フォルダ', path: cur.cwd }];
   const dirRows = dirs.map((d, i) => el('div', { style: 'display:flex;gap:6px;align-items:center;margin:3px 0;font-size:12px' },
     el('span', { style: 'color:#8a8a8a;width:110px;flex:none', textContent: d.label }), el('code', { style: 'flex:1;margin:0;padding:3px 6px;user-select:text', textContent: d.path }),
-    el('button', { textContent: '開く', onclick: () => api('business:dirOpen', d.path) }),
+    el('button', { textContent: '開く', onclick: () => api('business:dirOpen', cur.id, i) }),
     i === 0 ? '' : el('button', { textContent: '外す', onclick: async () => { await api('business:dirDelete', cur.id, d.label); openBizManager(cur.id); } })));
   const nl = el('input', { placeholder: 'ラベル（例：ソース（正））', style: 'width:160px' }), np = el('input', { placeholder: 'フォルダのパス', style: 'flex:1' });
   const addDir = el('div', { style: 'display:flex;gap:6px;margin-top:6px' }, nl, np, el('button', { textContent: '追加', onclick: async () => {

@@ -9,7 +9,17 @@ const { stripAnsi } = require('./guard');
 
 const BUF_MAX = 400 * 1024;
 // 子のプロセスの起動は、作業フォルダの中身に左右されないようにする（コマンドは PATH から探す）。
-const childEnv = (env) => (process.platform === 'win32' ? { ...env, NoDefaultCurrentDirectoryInExePath: '1' } : env);
+function childEnv(env) {
+  if (process.platform !== 'win32') return env;
+  const out = { ...env, NoDefaultCurrentDirectoryInExePath: '1' };
+  const keys = Object.keys(out).filter((k) => k.toUpperCase() === 'PATH');
+  if (keys.length) {
+    const v = String(out[keys[0]] || '');
+    for (const k of keys) delete out[k];
+    out.Path = v.split(';').filter((p) => { const x = p.trim().replace(/^"|"$/g, ''); return x && /^[A-Za-z]:[\\/]/.test(x); }).join(';');
+  }
+  return out;
+}
 // Windows の道具（cmd・PowerShell・taskkill）は、Windows のフォルダの絶対パスで起動する
 const SYS32 = path.join(process.env.SystemRoot || process.env.windir || 'C:\\Windows', 'System32');
 const sysTool = (rel, fallback) => { const p = path.join(SYS32, rel); return fs.existsSync(p) ? p : fallback; };
@@ -94,4 +104,4 @@ class PtyManager extends EventEmitter {
   stopAll() { for (const id of this.map.keys()) this.stop(id); }
   forget(id) { this.stop(id); this.map.delete(id); }
 }
-module.exports = { PtyManager, encodeCwd, cleanEnv };
+module.exports = { PtyManager, encodeCwd, cleanEnv, childEnv };

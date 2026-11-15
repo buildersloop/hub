@@ -874,6 +874,31 @@ check('子のプロセス：起動の環境（作業フォルダに左右され�
   assert.ok(/execFile\(sysTool\('taskkill\.exe'/.test(src), 'taskkill も、絶対パスで');
 });
 
+check('子のプロセス：PATH から、絶対パスでない項目・空の項目を除く（Path と PATH は 1 つに）', () => {
+  if (process.platform !== 'win32') return;
+  const { childEnv } = require('../src/ptys');
+  const e = childEnv({ PATH: ['C:\\Windows', '.', '', 'node_modules\\.bin', '"C:\\Program Files\\x"', 'C:rel'].join(';'), Path: 'ignored', X: '1' });
+  assert.deepStrictEqual(Object.keys(e).filter((k) => k.toUpperCase() === 'PATH'), ['Path']);
+  assert.strictEqual(e.Path, ['C:\\Windows', '"C:\\Program Files\\x"'].join(';'));
+  assert.strictEqual(e.NoDefaultCurrentDirectoryInExePath, '1');
+  assert.strictEqual(e.X, '1');
+});
+check('「開く」：登録したフォルダに引き直し、フォルダのときだけ開く。作業フォルダには、フォルダだけを指定できる', () => {
+  const { hub, dir } = mkHub();
+  const work = fs.mkdtempSync(path.join(dir, 'w-'));
+  hub.businessUpsert({ id: 'obiz', name: 'O', cwd: work });
+  assert.strictEqual(hub.openableDir('obiz', 0), work);
+  const bat = path.join(work, 'run.bat');
+  fs.writeFileSync(bat, '@echo x');
+  assert.throws(() => hub.businessUpsert({ id: 'obiz', cwd: bat }, 'agent'), /フォルダを指定/);
+  assert.throws(() => hub.businessUpsert({ id: 'obiz2', name: 'x', cwd: bat }, 'human'), /フォルダを指定/);
+  hub.business('obiz').cwd = bat;   // 古いデータ・手で直した hub.json
+  assert.throws(() => hub.openableDir('obiz', 0), /フォルダではない/);
+  assert.throws(() => hub.openableDir('obiz', 9), /登録されていません/);
+  const mainSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'main.js'), 'utf8');
+  assert.ok(/H\('business:dirOpen', \(business, index\) => shell\.openPath\(hub\.openableDir\(business, index\)\)\)/.test(mainSrc), '画面からパスを受け取らない');
+});
+
 // ---- 時間を使う試験（タイマーを待つ）
 const checkAsync = async (name, fn) => { try { await fn(); pass++; console.log('PASS ' + name); } catch (e) { fail++; console.log('FAIL ' + name + '  [' + e.message + ']'); } };
 (async () => {
