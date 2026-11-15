@@ -600,6 +600,17 @@ class Hub extends EventEmitter {
     this.emit('ui:update');
     return this.dirsOf(b);
   }
+  // 「開く」（人の画面）：登録したフォルダ（index 番目。0 は作業フォルダ）を、フォルダのときだけ返す（ファイルは開かない）
+  openableDir(business, index) {
+    const b = this.business(business);
+    if (!b) throw new Error(`事業 ${business} がありません`);
+    const d = this.dirsOf(b)[Number(index)];
+    if (!d) throw new Error('そのフォルダは登録されていません');
+    let st;
+    try { st = fs.statSync(d.path); } catch { throw new Error(`フォルダが見つかりません：${d.path}`); }
+    if (!st.isDirectory()) throw new Error(`フォルダではないので、開きません：${d.path}`);
+    return d.path;
+  }
   dirDelete({ business, label }) {
     const b = this.business(business);
     if (!b) throw new Error(`事業 ${business} がありません`);
@@ -764,6 +775,7 @@ ${b.note ? `\n## 事業メモ\n${b.note}\n` : ''}
   businessUpsert({ id, name, color, cwd, note }, by = 'human') {
     if (!/^[a-z0-9_-]{2,30}$/.test(String(id || ''))) throw new Error('id は、半角の英小文字・数字・_・- で 2〜30 文字');
     if (cwd && !fs.existsSync(cwd)) throw new Error(`作業フォルダが見つかりません：${cwd}`);
+    if (cwd && !fs.statSync(cwd).isDirectory()) throw new Error('作業フォルダには、フォルダを指定してください');
     if (cwd) this._assertSafeFolder(cwd);
     if (color && !/^#[0-9a-fA-F]{6}$/.test(color)) throw new Error('color は #rrggbb');
     let b = this.business(id);
