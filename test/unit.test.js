@@ -877,9 +877,9 @@ check('子のプロセス：起動の環境（作業フォルダに左右され�
 check('子のプロセス：PATH から、絶対パスでない項目・空の項目を除く（Path と PATH は 1 つに）', () => {
   if (process.platform !== 'win32') return;
   const { childEnv } = require('../src/ptys');
-  const e = childEnv({ PATH: ['C:\\Windows', '.', '', 'node_modules\\.bin', '"C:\\Program Files\\x"', 'C:rel'].join(';'), Path: 'ignored', X: '1' });
+  const e = childEnv({ PATH: ['C:\\Windows', '.', '', 'node_modules\\.bin', '"C:\\Program Files\\x"', 'C:rel', '\\\\srv\\tools', '\\\\?\\C:\\x'].join(';'), Path: 'ignored', X: '1' });
   assert.deepStrictEqual(Object.keys(e).filter((k) => k.toUpperCase() === 'PATH'), ['Path']);
-  assert.strictEqual(e.Path, ['C:\\Windows', '"C:\\Program Files\\x"'].join(';'));
+  assert.strictEqual(e.Path, ['C:\\Windows', '"C:\\Program Files\\x"', '\\\\srv\\tools'].join(';'), 'ネットワークの共有は残し、装置の道（\\\\?\\）は除く');
   assert.strictEqual(e.NoDefaultCurrentDirectoryInExePath, '1');
   assert.strictEqual(e.X, '1');
 });

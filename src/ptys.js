@@ -16,7 +16,7 @@ function childEnv(env) {
   if (keys.length) {
     const v = String(out[keys[0]] || '');
     for (const k of keys) delete out[k];
-    out.Path = v.split(';').filter((p) => { const x = p.trim().replace(/^"|"$/g, ''); return x && /^[A-Za-z]:[\\/]/.test(x); }).join(';');
+    out.Path = v.split(';').filter((p) => { const x = p.trim().replace(/^"|"$/g, ''); return x && /^(?:[A-Za-z]:[\\/]|\\\\[^\\?.])/.test(x); }).join(';');
   }
   return out;
 }
