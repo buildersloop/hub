@@ -42,7 +42,7 @@ node test/hubctl.js <tool> '<json>'      # 動いている Hub を、MCP で操�
 8. **MCP の接続（`mcp:*`・`session:mcpGet/mcpSet`）は、人が画面で行う IPC だけ**。MCP のツールには、接続の読み取りも変更も、足さない（秘密の値に、AI が触れないように）。画面に返すのは、「どの秘密が設定済みか」だけで、値は返さない。暗号化できない PC では、秘密の値を保存しない。
 9. **`--append-system-prompt-file` や `--mcp-config` に渡すパスは、引用符をつけない**（cmd 経由で壊れ、セッションが 1 秒で落ちる）。安全な文字だけのパスのときだけ渡す（`SAFE_ARG_PATH`）。渡せないときは、黙って落とさず、記録と画面に出す。
 10. **名前・役割（セッション・事業）は、1 行の表示名**（`cleanLabel`：改行・制御文字・【】を除く）。自己紹介（system prompt）に入るため、エージェントが偽の見出し（例：【組織のルール】）を仕込めないようにする。
-11. **MCP を、コマンドの実行の入口にしない**：MCP の `session_create` が作れるのは `kind=claude` だけ（`shell`・`custom`・`command`・`args` を受け取らない）。`session_send`・`session_key` は、Claude Code 以外のセッションへの入力を拒否する（人の画面だけ）。MCP の `session_resume`・`profile_run` は、シェル・コマンドのセッションを起動しない。プロファイルからは `custom` を作れない。`createSession`・`startSession`・`sendKey`・`profileRun`・`adoptSession` の `by` の既定は `agent`（安全な側）で、画面の IPC が `human` を明示する。Hub が起こす子のプロセスは、作業フォルダにある同じ名前のファイルを拾わない（`ptys.js` の `childEnv`：`NoDefaultCurrentDirectoryInExePath`。cmd・PowerShell・taskkill は Windows のフォルダの絶対パス）。
+11. **MCP を、コマンドの実行の入口にしない**：MCP の `session_create` が作れるのは `kind=claude` だけ（`shell`・`custom`・`command`・`args` を受け取らない）。`session_send`・`session_key` は、Claude Code 以外のセッションへの入力を拒否する（人の画面だけ）。MCP の `session_resume`・`profile_run` は、シェル・コマンドのセッションを起動しない。プロファイルからは `custom` を作れない。`createSession`・`startSession`・`sendKey`・`profileRun`・`adoptSession` の `by` の既定は `agent`（安全な側）で、画面の IPC が `human` を明示する。Hub が起こす子のプロセスは、作業フォルダの中身に左右されない起動にする（`ptys.js` の `childEnv`・`sysTool`）。
 12. **エージェントが書いた指示は、人の発言に見せない**：MCP の `session_create` の prompt、`by` が人でないプロファイルの prompt、MCP の `setup_agent_start` の task、エージェントが作ったプリセット（人がボタンで送るときも）には、先頭に「【送信元：…】」を付ける（自己紹介では「見出しのない文は、人から」と教えているため）。
 13. **確認の画面に、エージェントの入力を入れない**：最初の指示・預かった送信は、確認の画面が出ているあいだは渡さない（`sendWhenReady`）。起動のたびに、入力を受けられる状態を一度通るまで（`_ready`）、エージェントの文は預かり、Enter・キーは拒否する（あとから出る確認が、たまった入力を受け取らないように）。Enter の直前にも、確認の画面を見直す（`typeAndSubmit`。打った文の中の語も区別しない）。そのため、確認の画面に使われる語（`guard.js` の `PERMISSION_PATTERNS`）を含むエージェントの文（`session_send`・MCP の最初の指示・エージェントのプロファイル・`setup_agent_start`）は、送る前に断る。
 14. **アプリ内ブラウザは、ページからの権限の要求を、既定で断る**（`browser.js` の `guardPermissions`。許すのは全画面と、クリップボードへの書き込みだけ）。端末の OSC 52（コピーの依頼）は、Claude Code のセッションで、人が直前に操作したときだけ受け付け、記録の再生中は受け付けない。
@@ -66,7 +66,6 @@ node test/hubctl.js <tool> '<json>'      # 動いている Hub を、MCP で操�
 - **画面（端末）の文字を読むのは、再描画で崩れる**。`session_read` は、会話の記録（.jsonl）を主に使う。
 - **`node-pty` の `pty.kill()` は、Windows で、ログが荒れる**。`taskkill /T /F` を先にして、最後の手段にする。
 - **PowerShell の `Remove-Item Env:...` は、安全装置に「システムパスの削除」と誤判定される**。`[Environment]::SetEnvironmentVariable(名, $null)` を使う。
-- **cmd は、名前だけのコマンドを、PATH より先に、いまのフォルダから探す**。Claude Code の中のシェルには `NoDefaultCurrentDirectoryInExePath` が入っているので、手元の試験では見えない（エクスプローラーから起動した Hub には無い）。子のプロセスの環境変数には、いつも入れる（`childEnv`）。
 - **`sleep` の長い待機は、実行環境が止める**。待つなら、短い確認の繰り返し、またはバックグラウンドで。
 - 会話の記録の場所：`~\.claude\projects\<作業フォルダの英数字以外を - に置換>\<セッション ID>.jsonl`。
 - **「終了コード 1」は、失敗とは限らない**：強制終了（アプリを閉じる・停止）は、Windows で終了コード 1 になる。`lastExit.reason`（`app-quit`／`stopped`／`exited`）で区別する。セットアップ担当などが「落ちた」ように見えたときは、まず、`node test/repro-setup.js "" --prompt`（新しい ID で、起動から最初の指示までを再現）で、本当に落ちるかを確かめる。

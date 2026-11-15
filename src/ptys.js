@@ -8,10 +8,9 @@ const { EventEmitter } = require('events');
 const { stripAnsi } = require('./guard');
 
 const BUF_MAX = 400 * 1024;
-// 子のプロセス（cmd・claude）は、作業フォルダにある同じ名前のファイル（claude.cmd など）を拾わない。
-// cmd は、名前だけのコマンドを、PATH より先に、いまのフォルダから探すため。この変数があると、いまのフォルダを探さない。
+// 子のプロセスの起動は、作業フォルダの中身に左右されないようにする（コマンドは PATH から探す）。
 const childEnv = (env) => (process.platform === 'win32' ? { ...env, NoDefaultCurrentDirectoryInExePath: '1' } : env);
-// Windows の道具（cmd・PowerShell・taskkill）は、Windows のフォルダの絶対パスで起動する（どのフォルダの同名のファイルも拾わない）
+// Windows の道具（cmd・PowerShell・taskkill）は、Windows のフォルダの絶対パスで起動する
 const SYS32 = path.join(process.env.SystemRoot || process.env.windir || 'C:\\Windows', 'System32');
 const sysTool = (rel, fallback) => { const p = path.join(SYS32, rel); return fs.existsSync(p) ? p : fallback; };
 const encodeCwd = (cwd) => cwd.replace(/[^a-zA-Z0-9]/g, '-');   // Claude Code が会話の記録を置く場所の規則

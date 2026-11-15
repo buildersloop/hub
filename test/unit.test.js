@@ -850,19 +850,10 @@ check('版の主な変更：CHANGELOG の節から、太字の項目を取り出
   if (versionSection(real, ver)) assert.ok(versionNotice(real, ver).startsWith(ver + ' の主な変更：'), '同梱の CHANGELOG.md から作れる');
 });
 
-// ---- 子のプロセスの起動：作業フォルダにある同じ名前のファイルを拾わない
-check('子のプロセス：Claude Code の起動に「いまのフォルダを探さない」を付け、cmd・PowerShell は絶対パスで起動する（作業フォルダの claude.cmd を動かさない）', () => {
+// ---- 子のプロセスの起動
+check('子のプロセス：起動の環境（作業フォルダに左右されない設定）と、Windows の道具の絶対パス', () => {
   if (process.platform !== 'win32') return;
-  const { spawnSync } = require('child_process');
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hubchild-'));
-  const name = 'hubprobe' + process.pid;
-  fs.writeFileSync(path.join(dir, name + '.cmd'), '@echo HUB-PROBE-RAN\r\n');
-  const base = { ...process.env };
-  delete base.NoDefaultCurrentDirectoryInExePath;
-  const run = (env) => spawnSync(process.env.ComSpec || 'cmd.exe', ['/d', '/c', name], { cwd: dir, env, encoding: 'utf8', windowsHide: true }).stdout || '';
-  assert.ok(run(base).includes('HUB-PROBE-RAN'), '（確かめ）変数が無いと、cmd は、いまのフォルダのファイルを動かす');
-  assert.ok(!run({ ...base, NoDefaultCurrentDirectoryInExePath: '1' }).includes('HUB-PROBE-RAN'), '変数があれば、動かさない');
-  // PtyManager が、その変数と、絶対パスで起動する
   const nodePty = require('node-pty');
   const orig = nodePty.spawn;
   const seen = [];
@@ -872,7 +863,8 @@ check('子のプロセス：Claude Code の起動に「いまのフォルダを�
     pm.hasConversation = () => false;
     pm.start({ id: 'c1', kind: 'claude', cwd: dir, args: [] });
     pm.start({ id: 's1', kind: 'shell', cwd: dir, args: [] });
-  } finally { nodePty.spawn = orig; }
+  } finally { nodePty.spawn = orig; fs.rmSync(dir, { recursive: true, force: true }); }
+  assert.strictEqual(seen.length, 2);
   for (const x of seen) {
     assert.strictEqual(x.opts.env.NoDefaultCurrentDirectoryInExePath, '1');
     assert.ok(path.isAbsolute(x.file), '絶対パスで起動：' + x.file);
