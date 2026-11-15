@@ -23,7 +23,9 @@ function childEnv(env) {
 // Windows の道具（cmd・PowerShell・taskkill）は、Windows のフォルダの絶対パスで起動する
 const SYS32 = path.join(process.env.SystemRoot || process.env.windir || 'C:\\Windows', 'System32');
 const sysTool = (rel, fallback) => { const p = path.join(SYS32, rel); return fs.existsSync(p) ? p : fallback; };
-const encodeCwd = (cwd) => cwd.replace(/[^a-zA-Z0-9]/g, '-');   // Claude Code が会話の記録を置く場所の規則
+// Claude Code が会話の記録を置く場所の規則。Claude Code は、起動したフォルダ（process.cwd()：末尾の区切り・「..」を持たない）で決めるので、
+// 同じ形にそろえてから置き換える（「D:\proj\」のままだと「D--proj-」になり、記録が見つからず、再開が新規の起動になる）。
+const encodeCwd = (cwd) => path.resolve(String(cwd)).replace(/[^a-zA-Z0-9]/g, '-');
 
 // 親の Claude Code のセッションが持つ環境変数を、子に渡さない。渡すと、子が「子セッション」と見なされ、
 // 会話の記録が保存されない（再開できない・共同作業の読み取りもできない）。設定用の変数（CLAUDE_CONFIG_DIR 等）は、残す。
