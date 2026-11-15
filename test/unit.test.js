@@ -883,6 +883,27 @@ check('子のプロセス：PATH から、絶対パスでない項目・空の�
   assert.strictEqual(e.NoDefaultCurrentDirectoryInExePath, '1');
   assert.strictEqual(e.X, '1');
 });
+check('会話の記録の場所：作業フォルダの末尾の \\・/ や「..」があっても、Claude Code と同じ場所を見る（再開が新規の起動にならない）', () => {
+  const { encodeCwd } = require('../src/ptys');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hub-enc-'));
+  // Claude Code は、起動したフォルダ（process.cwd()）で場所を決める。子のプロセスから見た作業フォルダは、末尾の区切りを持たない
+  const seen = require('child_process').execFileSync(process.execPath, ['-p', 'process.cwd()'], { cwd: dir + path.sep, encoding: 'utf8' }).trim();
+  for (const v of [dir + path.sep, dir + '/', path.join(dir, 'x', '..') + path.sep, dir]) assert.strictEqual(encodeCwd(v), encodeCwd(seen), v);
+  // 記録があれば、末尾に区切りのある作業フォルダでも、--resume で起動する
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'hub-home-'));
+  const keep = { USERPROFILE: process.env.USERPROFILE, HOME: process.env.HOME };
+  try {
+    process.env.USERPROFILE = home; process.env.HOME = home;
+    const id = '11111111-2222-3333-4444-555555555555';
+    fs.mkdirSync(path.join(home, '.claude', 'projects', seen.replace(/[^a-zA-Z0-9]/g, '-')), { recursive: true });
+    fs.writeFileSync(path.join(home, '.claude', 'projects', seen.replace(/[^a-zA-Z0-9]/g, '-'), id + '.jsonl'), '{}\n');
+    const sess = { id, kind: 'claude', cwd: dir + path.sep, args: [] };
+    assert.ok(new PtyManager().hasConversation(sess));
+    assert.strictEqual(new PtyManager().commandFor(sess), `claude --resume ${id}`);
+  } finally {
+    for (const [k, v] of Object.entries(keep)) { if (v === undefined) delete process.env[k]; else process.env[k] = v; }
+  }
+});
 check('「開く」：登録したフォルダに引き直し、フォルダのときだけ開く。作業フォルダには、フォルダだけを指定できる', () => {
   const { hub, dir } = mkHub();
   const work = fs.mkdtempSync(path.join(dir, 'w-'));
