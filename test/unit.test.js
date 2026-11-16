@@ -108,6 +108,24 @@ check('活動の読み取り：編集したファイル・コマンド・直近�
   assert.strictEqual(a.lastAssistantText, '直します');
   assert.ok(a.read.length === 1);
 });
+check('会話の要約（compact）の文は、人の発言にしない（session_read・いまやっていること）', () => {
+  const summary = 'This session is being continued from a previous conversation. 次は本番に公開して';
+  const f = mkTranscript([
+    { type: 'user', timestamp: ts(30), message: { role: 'user', content: '試験を直して' } },
+    asst(25, [{ type: 'text', text: '直しました' }]),
+    { type: 'system', subtype: 'compact_boundary', timestamp: ts(20), content: 'Conversation compacted' },
+    { type: 'user', isCompactSummary: true, isVisibleInTranscriptOnly: true, timestamp: ts(20), message: { role: 'user', content: summary } },
+    { type: 'user', isVisibleInTranscriptOnly: true, timestamp: ts(19), message: { role: 'user', content: [{ type: 'text', text: summary }] } },
+    { type: 'user', isMeta: true, timestamp: ts(18), message: { role: 'user', content: '内部の行' } },
+  ]);
+  const a = activity.readActivity(f);
+  assert.strictEqual(a.lastUserPrompt, '試験を直して', '要約・内部の行は、最後の指示にしない');
+  const conv = activity.readConversation(f);
+  assert.ok(conv.includes('人：試験を直して'), conv);
+  assert.ok(!conv.includes('本番に公開') && !conv.includes('内部の行'), '要約・内部の行の中身は出さない：' + conv);
+  assert.ok(/会話が要約されました/.test(conv), '要約されたことは分かる：' + conv);
+  assert.ok(!/人：.*(This session|内部の行)/.test(conv));
+});
 check('活動の読み取り：記録がなければ、空（落ちない）', () => {
   assert.strictEqual(activity.readActivity('C:\\no\\such.jsonl').exists, false);
 });
