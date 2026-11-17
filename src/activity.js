@@ -25,10 +25,12 @@ const textOf = (content) => {
   return content.filter((c) => c && c.type === 'text').map((c) => c.text).join('\n');
 };
 // 会話の要約（/compact・自動の要約）：Claude Code は、要約の文を type:'user' の行として書く。Claude が書いた文なので、人の発言として扱わない。
-const isCompactSummary = (o) => !!(o.isCompactSummary || o.isVisibleInTranscriptOnly);
+// isVisibleInTranscriptOnly は、要約のほかの行にも付くことがあるため、人の発言から外すだけにし、「要約されました」の知らせは isCompactSummary の行だけで出す。
+const isCompactSummary = (o) => !!o.isCompactSummary;
+const isNotHuman = (o) => !!(o.isSidechain || o.isMeta || o.isCompactSummary || o.isVisibleInTranscriptOnly);
 // 人が打った発言か（サブエージェント・要約・内部の行・<タグ> で始まる行は除く）
 const humanText = (o) => {
-  if (o.type !== 'user' || o.isSidechain || o.isMeta || isCompactSummary(o)) return '';
+  if (o.type !== 'user' || isNotHuman(o)) return '';
   const t = textOf((o.message || {}).content).trim();
   return t && !t.startsWith('<') ? t : '';
 };
@@ -75,6 +77,8 @@ function readActivity(file, { sinceMs = 6 * 3600 * 1000 } = {}) {
 function readConversation(file, maxChars = 6000) {
   if (!file || !fs.existsSync(file)) return '';
   const lines = [];
+  const NOTE = '（ここで、会話が要約されました。要約の文は、人の発言ではないため省きます）';
+  let lastNote = -1;   // 直前に出した知らせの位置（要約の行が続けて来ても、知らせは 1 行にする）
   for (const line of readTail(file, 500 * 1024).split('\n')) {
     if (!line.trim()) continue;
     let o;
@@ -82,7 +86,7 @@ function readConversation(file, maxChars = 6000) {
     const msg = o.message || {};
     const hhmm = o.timestamp ? new Date(o.timestamp).toTimeString().slice(0, 5) : '';
     if (o.type === 'user' && !o.isSidechain && isCompactSummary(o)) {
-      lines.push(`[${hhmm}] （ここで、会話が要約されました。要約の文は、人の発言ではないため省きます）`);
+      if (lastNote < 0 || lastNote !== lines.length - 1) { lines.push(`[${hhmm}] ${NOTE}`); lastNote = lines.length - 1; }
     } else if (o.type === 'user') {
       const t = humanText(o);
       if (t) lines.push(`[${hhmm}] 人：${t}`);

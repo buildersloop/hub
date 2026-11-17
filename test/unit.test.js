@@ -124,7 +124,22 @@ check('会話の要約（compact）の文は、人の発言にしない（sessio
   assert.ok(conv.includes('人：試験を直して'), conv);
   assert.ok(!conv.includes('本番に公開') && !conv.includes('内部の行'), '要約・内部の行の中身は出さない：' + conv);
   assert.ok(/会話が要約されました/.test(conv), '要約されたことは分かる：' + conv);
+  assert.strictEqual((conv.match(/会話が要約されました/g) || []).length, 1, '要約 1 回につき、知らせは 1 行だけ：' + conv);
   assert.ok(!/人：.*(This session|内部の行)/.test(conv));
+});
+check('会話の要約：要約の目印だけの行（isVisibleInTranscriptOnly）は、知らせを出さずに省く', () => {
+  const f = mkTranscript([
+    { type: 'user', timestamp: ts(30), message: { role: 'user', content: '試験を直して' } },
+    { type: 'user', isVisibleInTranscriptOnly: true, timestamp: ts(20), message: { role: 'user', content: '画面だけに出す行' } },
+    { type: 'user', timestamp: ts(10), message: { role: 'user', content: '続けて' } },
+    { type: 'system', subtype: 'compact_boundary', timestamp: ts(8), content: 'Conversation compacted' },
+    { type: 'user', isCompactSummary: true, timestamp: ts(8), message: { role: 'user', content: 'SUMMARY-BODY' } },
+  ]);
+  const conv = activity.readConversation(f);
+  assert.ok(!conv.includes('画面だけに出す行') && !conv.includes('SUMMARY-BODY'), '目印の行・要約の中身は出さない：' + conv);
+  assert.strictEqual((conv.match(/会話が要約されました/g) || []).length, 1, '本当の要約の 1 回だけ：' + conv);
+  assert.ok(/人：試験を直して[\s\S]*人：続けて[\s\S]*会話が要約されました/.test(conv), '知らせは、要約の位置に出る：' + conv);
+  assert.strictEqual(activity.readActivity(f).lastUserPrompt, '続けて');
 });
 check('活動の読み取り：記録がなければ、空（落ちない）', () => {
   assert.strictEqual(activity.readActivity('C:\\no\\such.jsonl').exists, false);
