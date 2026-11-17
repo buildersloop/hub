@@ -24,6 +24,14 @@ const textOf = (content) => {
   if (!Array.isArray(content)) return '';
   return content.filter((c) => c && c.type === 'text').map((c) => c.text).join('\n');
 };
+// 会話の要約（/compact・自動の要約）：Claude Code は、要約の文を type:'user' の行として書く。Claude が書いた文なので、人の発言として扱わない。
+const isCompactSummary = (o) => !!(o.isCompactSummary || o.isVisibleInTranscriptOnly);
+// 人が打った発言か（サブエージェント・要約・内部の行・<タグ> で始まる行は除く）
+const humanText = (o) => {
+  if (o.type !== 'user' || o.isSidechain || o.isMeta || isCompactSummary(o)) return '';
+  const t = textOf((o.message || {}).content).trim();
+  return t && !t.startsWith('<') ? t : '';
+};
 
 // 会話の記録から、最近の活動を取り出す
 function readActivity(file, { sinceMs = 6 * 3600 * 1000 } = {}) {
@@ -39,9 +47,9 @@ function readActivity(file, { sinceMs = 6 * 3600 * 1000 } = {}) {
     const at = Date.parse(o.timestamp) || 0;
     if (at) out.lastAt = Math.max(out.lastAt, at);
     const msg = o.message || {};
-    if (o.type === 'user' && !o.isSidechain) {
-      const t = textOf(msg.content).trim();
-      if (t && !t.startsWith('<') ) out.lastUserPrompt = t.slice(0, 400);
+    if (o.type === 'user') {
+      const t = humanText(o);
+      if (t) out.lastUserPrompt = t.slice(0, 400);
     } else if (o.type === 'assistant') {
       const t = textOf(msg.content).trim();
       if (t) out.lastAssistantText = t.slice(0, 600);
@@ -73,9 +81,11 @@ function readConversation(file, maxChars = 6000) {
     try { o = JSON.parse(line); } catch { continue; }
     const msg = o.message || {};
     const hhmm = o.timestamp ? new Date(o.timestamp).toTimeString().slice(0, 5) : '';
-    if (o.type === 'user' && !o.isSidechain) {
-      const t = textOf(msg.content).trim();
-      if (t && !t.startsWith('<')) lines.push(`[${hhmm}] 人：${t}`);
+    if (o.type === 'user' && !o.isSidechain && isCompactSummary(o)) {
+      lines.push(`[${hhmm}] （ここで、会話が要約されました。要約の文は、人の発言ではないため省きます）`);
+    } else if (o.type === 'user') {
+      const t = humanText(o);
+      if (t) lines.push(`[${hhmm}] 人：${t}`);
     } else if (o.type === 'assistant') {
       const t = textOf(msg.content).trim();
       const tools = (Array.isArray(msg.content) ? msg.content : []).filter((c) => c && c.type === 'tool_use').map((c) => c.name);

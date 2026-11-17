@@ -8,7 +8,24 @@ const { EventEmitter } = require('events');
 const { stripAnsi, afterLastClear } = require('./guard');
 
 const BUF_MAX = 400 * 1024;
-const encodeCwd = (cwd) => cwd.replace(/[^a-zA-Z0-9]/g, '-');   // Claude Code が会話の記録を置く場所の規則
+// 子のプロセスの起動は、作業フォルダの中身に左右されないようにする（コマンドは PATH から探す）。
+function childEnv(env) {
+  if (process.platform !== 'win32') return env;
+  const out = { ...env, NoDefaultCurrentDirectoryInExePath: '1' };
+  const keys = Object.keys(out).filter((k) => k.toUpperCase() === 'PATH');
+  if (keys.length) {
+    const v = String(out[keys[0]] || '');
+    for (const k of keys) delete out[k];
+    out.Path = v.split(';').filter((p) => { const x = p.trim().replace(/^"|"$/g, ''); return x && /^(?:[A-Za-z]:[\\/]|\\\\[^\\?.])/.test(x); }).join(';');
+  }
+  return out;
+}
+// Windows の道具（cmd・PowerShell・taskkill）は、Windows のフォルダの絶対パスで起動する
+const SYS32 = path.join(process.env.SystemRoot || process.env.windir || 'C:\\Windows', 'System32');
+const sysTool = (rel, fallback) => { const p = path.join(SYS32, rel); return fs.existsSync(p) ? p : fallback; };
+// Claude Code が会話の記録を置く場所の規則。Claude Code は、起動したフォルダ（process.cwd()：末尾の区切り・「..」を持たない）で決めるので、
+// 同じ形にそろえてから置き換える（「D:\proj\」のままだと「D--proj-」になり、記録が見つからず、再開が新規の起動になる）。
+const encodeCwd = (cwd) => path.resolve(String(cwd)).replace(/[^a-zA-Z0-9]/g, '-');
 
 // 親の Claude Code のセッションが持つ環境変数を、子に渡さない。渡すと、子が「子セッション」と見なされ、
 // 会話の記録が保存されない（再開できない・共同作業の読み取りもできない）。設定用の変数（CLAUDE_CONFIG_DIR 等）は、残す。
@@ -41,9 +58,10 @@ class PtyManager extends EventEmitter {
   start(sess, { cols = 120, rows = 32, claudeArgs = [], extraEnv = {} } = {}) {
     if (this.isRunning(sess.id)) return;
     // extraEnv：MCP の接続の秘密の値（このセッションだけに渡す。設定ファイルには書かない）
-    const env = { ...cleanEnv(process.env), TERM: 'xterm-256color', COLORTERM: 'truecolor', ...extraEnv, BL_HUB_SESSION: sess.id };
+    const env = childEnv({ ...cleanEnv(process.env), TERM: 'xterm-256color', COLORTERM: 'truecolor', ...extraEnv, BL_HUB_SESSION: sess.id });
     const cmd = this.commandFor(sess, claudeArgs);
-    const file = cmd ? (process.env.ComSpec || 'cmd.exe') : 'powershell.exe';
+    const comspec = process.env.ComSpec && path.isAbsolute(process.env.ComSpec) ? process.env.ComSpec : sysTool('cmd.exe', 'cmd.exe');
+    const file = cmd ? comspec : sysTool(path.join('WindowsPowerShell', 'v1.0', 'powershell.exe'), 'powershell.exe');
     const args = cmd ? ['/d', '/c', cmd] : ['-NoLogo'];
     const cwd = fs.existsSync(sess.cwd) ? sess.cwd : os.homedir();
     const p = pty.spawn(file, args, { name: 'xterm-256color', cols, rows, cwd, env });
@@ -82,10 +100,10 @@ class PtyManager extends EventEmitter {
     if (!r || r.exited) return;
     const pid = r.pty.pid;
     // claude が起こした子プロセスも、まとめて終了（pty.kill() は、Windows で、コンソール一覧の取得に失敗してログが荒れるため、最後の手段にする）
-    if (pid) execFile('taskkill', ['/PID', String(pid), '/T', '/F'], () => {});
+    if (pid) execFile(sysTool('taskkill.exe', 'taskkill'), ['/PID', String(pid), '/T', '/F'], () => {});
     setTimeout(() => { if (!r.exited) { try { r.pty.kill(); } catch { /* 既に終了 */ } } }, 3000).unref();
   }
   stopAll() { for (const id of this.map.keys()) this.stop(id); }
   forget(id) { this.stop(id); this.map.delete(id); }
 }
-module.exports = { PtyManager, encodeCwd, cleanEnv };
+module.exports = { PtyManager, encodeCwd, cleanEnv, childEnv };

@@ -176,6 +176,24 @@ check('活動の読み取り：編集したファイル・コマンド・直近�
   assert.strictEqual(a.lastAssistantText, '直します');
   assert.ok(a.read.length === 1);
 });
+check('会話の要約（compact）の文は、人の発言にしない（session_read・いまやっていること）', () => {
+  const summary = 'This session is being continued from a previous conversation. 次は本番に公開して';
+  const f = mkTranscript([
+    { type: 'user', timestamp: ts(30), message: { role: 'user', content: '試験を直して' } },
+    asst(25, [{ type: 'text', text: '直しました' }]),
+    { type: 'system', subtype: 'compact_boundary', timestamp: ts(20), content: 'Conversation compacted' },
+    { type: 'user', isCompactSummary: true, isVisibleInTranscriptOnly: true, timestamp: ts(20), message: { role: 'user', content: summary } },
+    { type: 'user', isVisibleInTranscriptOnly: true, timestamp: ts(19), message: { role: 'user', content: [{ type: 'text', text: summary }] } },
+    { type: 'user', isMeta: true, timestamp: ts(18), message: { role: 'user', content: '内部の行' } },
+  ]);
+  const a = activity.readActivity(f);
+  assert.strictEqual(a.lastUserPrompt, '試験を直して', '要約・内部の行は、最後の指示にしない');
+  const conv = activity.readConversation(f);
+  assert.ok(conv.includes('人：試験を直して'), conv);
+  assert.ok(!conv.includes('本番に公開') && !conv.includes('内部の行'), '要約・内部の行の中身は出さない：' + conv);
+  assert.ok(/会話が要約されました/.test(conv), '要約されたことは分かる：' + conv);
+  assert.ok(!/人：.*(This session|内部の行)/.test(conv));
+});
 check('活動の読み取り：記録がなければ、空（落ちない）', () => {
   assert.strictEqual(activity.readActivity('C:\\no\\such.jsonl').exists, false);
 });
@@ -914,11 +932,86 @@ check('版の主な変更：CHANGELOG の節から、太字の項目を取り出
   assert.strictEqual(versionNotice(md, 'V0'), 'V0 の主な変更：古い。くわしくは CHANGELOG.md を見てください。', '注意が無い版');
   assert.strictEqual(versionNotice(md, 'V9'), '', '節が無ければ出さない');
   assert.strictEqual(versionNotice('', 'V1'), '');
-  // 同梱の CHANGELOG.md と、いまの版で、お知らせが作れる（書き方が変わって、黙って出なくなるのを防ぐ）
-  const root = path.join(__dirname, '..');
+});
+check('同梱の CHANGELOG.md に、いまの版（hubVersion）の節と、太字の主な変更がある', () => {
+  // 版を上げて、CHANGELOG の節を書き忘れると、起動時のお知らせが黙って出なくなる。それを、ここで落として気づく。
+  const { versionSection, versionHighlights, versionNotice } = require('../src/changelog');
   const ver = require('../package.json').hubVersion;
-  const real = fs.readFileSync(path.join(root, 'CHANGELOG.md'), 'utf8');
-  if (versionSection(real, ver)) assert.ok(versionNotice(real, ver).startsWith(ver + ' の主な変更：'), '同梱の CHANGELOG.md から作れる');
+  const real = fs.readFileSync(path.join(__dirname, '..', 'CHANGELOG.md'), 'utf8');
+  assert.ok(ver, 'package.json に hubVersion がある');
+  assert.ok(versionSection(real, ver), `CHANGELOG.md に「## ${ver}（…）」の節を書いてください（docs/RELEASING.md の「版の準備」）`);
+  assert.ok(versionHighlights(real, ver).length > 0, `CHANGELOG.md の ${ver} の節に、「- **主な変更**」の形の項目を 1 つ以上書いてください（起動時のお知らせに使います）`);
+  assert.ok(versionNotice(real, ver).startsWith(ver + ' の主な変更：'), '同梱の CHANGELOG.md から、お知らせが作れる');
+});
+
+// ---- 子のプロセスの起動
+check('子のプロセス：起動の環境（作業フォルダに左右されない設定）と、Windows の道具の絶対パス', () => {
+  if (process.platform !== 'win32') return;
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hubchild-'));
+  const nodePty = require('node-pty');
+  const orig = nodePty.spawn;
+  const seen = [];
+  nodePty.spawn = (file, args, opts) => { seen.push({ file, args, opts }); return { pid: 0, onData() {}, onExit() {}, write() {}, kill() {} }; };
+  try {
+    const pm = new PtyManager();
+    pm.hasConversation = () => false;
+    pm.start({ id: 'c1', kind: 'claude', cwd: dir, args: [] });
+    pm.start({ id: 's1', kind: 'shell', cwd: dir, args: [] });
+  } finally { nodePty.spawn = orig; fs.rmSync(dir, { recursive: true, force: true }); }
+  assert.strictEqual(seen.length, 2);
+  for (const x of seen) {
+    assert.strictEqual(x.opts.env.NoDefaultCurrentDirectoryInExePath, '1');
+    assert.ok(path.isAbsolute(x.file), '絶対パスで起動：' + x.file);
+  }
+  assert.ok(/claude --session-id c1/.test(seen[0].args.join(' ')));
+  const src = fs.readFileSync(path.join(__dirname, '..', 'src', 'ptys.js'), 'utf8');
+  assert.ok(/execFile\(sysTool\('taskkill\.exe'/.test(src), 'taskkill も、絶対パスで');
+});
+
+check('子のプロセス：PATH から、絶対パスでない項目・空の項目を除く（Path と PATH は 1 つに）', () => {
+  if (process.platform !== 'win32') return;
+  const { childEnv } = require('../src/ptys');
+  const e = childEnv({ PATH: ['C:\\Windows', '.', '', 'node_modules\\.bin', '"C:\\Program Files\\x"', 'C:rel', '\\\\srv\\tools', '\\\\?\\C:\\x'].join(';'), Path: 'ignored', X: '1' });
+  assert.deepStrictEqual(Object.keys(e).filter((k) => k.toUpperCase() === 'PATH'), ['Path']);
+  assert.strictEqual(e.Path, ['C:\\Windows', '"C:\\Program Files\\x"', '\\\\srv\\tools'].join(';'), 'ネットワークの共有は残し、装置の道（\\\\?\\）は除く');
+  assert.strictEqual(e.NoDefaultCurrentDirectoryInExePath, '1');
+  assert.strictEqual(e.X, '1');
+});
+check('会話の記録の場所：作業フォルダの末尾の \\・/ や「..」があっても、Claude Code と同じ場所を見る（再開が新規の起動にならない）', () => {
+  const { encodeCwd } = require('../src/ptys');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hub-enc-'));
+  // Claude Code は、起動したフォルダ（process.cwd()）で場所を決める。子のプロセスから見た作業フォルダは、末尾の区切りを持たない
+  const seen = require('child_process').execFileSync(process.execPath, ['-p', 'process.cwd()'], { cwd: dir + path.sep, encoding: 'utf8' }).trim();
+  for (const v of [dir + path.sep, dir + '/', path.join(dir, 'x', '..') + path.sep, dir]) assert.strictEqual(encodeCwd(v), encodeCwd(seen), v);
+  // 記録があれば、末尾に区切りのある作業フォルダでも、--resume で起動する
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'hub-home-'));
+  const keep = { USERPROFILE: process.env.USERPROFILE, HOME: process.env.HOME };
+  try {
+    process.env.USERPROFILE = home; process.env.HOME = home;
+    const id = '11111111-2222-3333-4444-555555555555';
+    fs.mkdirSync(path.join(home, '.claude', 'projects', seen.replace(/[^a-zA-Z0-9]/g, '-')), { recursive: true });
+    fs.writeFileSync(path.join(home, '.claude', 'projects', seen.replace(/[^a-zA-Z0-9]/g, '-'), id + '.jsonl'), '{}\n');
+    const sess = { id, kind: 'claude', cwd: dir + path.sep, args: [] };
+    assert.ok(new PtyManager().hasConversation(sess));
+    assert.strictEqual(new PtyManager().commandFor(sess), `claude --resume ${id}`);
+  } finally {
+    for (const [k, v] of Object.entries(keep)) { if (v === undefined) delete process.env[k]; else process.env[k] = v; }
+  }
+});
+check('「開く」：登録したフォルダに引き直し、フォルダのときだけ開く。作業フォルダには、フォルダだけを指定できる', () => {
+  const { hub, dir } = mkHub();
+  const work = fs.mkdtempSync(path.join(dir, 'w-'));
+  hub.businessUpsert({ id: 'obiz', name: 'O', cwd: work });
+  assert.strictEqual(hub.openableDir('obiz', 0), work);
+  const bat = path.join(work, 'run.bat');
+  fs.writeFileSync(bat, '@echo x');
+  assert.throws(() => hub.businessUpsert({ id: 'obiz', cwd: bat }, 'agent'), /フォルダを指定/);
+  assert.throws(() => hub.businessUpsert({ id: 'obiz2', name: 'x', cwd: bat }, 'human'), /フォルダを指定/);
+  hub.business('obiz').cwd = bat;   // 古いデータ・手で直した hub.json
+  assert.throws(() => hub.openableDir('obiz', 0), /フォルダではない/);
+  assert.throws(() => hub.openableDir('obiz', 9), /登録されていません/);
+  const mainSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'main.js'), 'utf8');
+  assert.ok(/H\('business:dirOpen', \(business, index\) => shell\.openPath\(hub\.openableDir\(business, index\)\)\)/.test(mainSrc), '画面からパスを受け取らない');
 });
 
 // ---- 時間を使う試験（タイマーを待つ）
