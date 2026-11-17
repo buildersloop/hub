@@ -1014,6 +1014,35 @@ check('「開く」：登録したフォルダに引き直し、フォルダの�
   assert.ok(/H\('business:dirOpen', \(business, index\) => shell\.openPath\(hub\.openableDir\(business, index\)\)\)/.test(mainSrc), '画面からパスを受け取らない');
 });
 
+check('状態の取得：起動の環境・cmd の絶対パス・起動するフォルダ（Hub のデータのフォルダ）', () => {
+  if (process.platform !== 'win32') return;
+  const cp = require('child_process');
+  const { EventEmitter } = require('events');
+  const { ClaudeStatus } = require('../src/claude-status');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hubst-'));
+  const orig = cp.spawn;
+  const seen = [];
+  let got;
+  cp.spawn = (file, args, opts) => { seen.push({ file, args, opts }); const e = new EventEmitter(); e.stdout = null; e.pid = 0; return e; };
+  try {
+    new ClaudeStatus({ cwd: dir, env: { PATH: ['C:\\Windows', '.', 'node_modules\\.bin'].join(';'), X: '1' } })._exec((v) => { got = v; });
+    new ClaudeStatus({ cwd: path.join(dir, 'none') })._exec(() => {});
+  } finally { cp.spawn = orig; fs.rmSync(dir, { recursive: true, force: true }); }
+  assert.strictEqual(got, null, '出力が読めないときは「取れない」');
+  assert.strictEqual(seen.length, 2);
+  const [a, b] = seen;
+  assert.ok(path.isAbsolute(a.file), '絶対パスで起動：' + a.file);
+  assert.deepStrictEqual(a.args, ['/d', '/c', 'claude agents --json']);
+  assert.strictEqual(a.opts.cwd, dir);
+  assert.strictEqual(a.opts.env.NoDefaultCurrentDirectoryInExePath, '1');
+  assert.strictEqual(a.opts.env.Path, 'C:\\Windows');
+  assert.strictEqual(a.opts.env.X, '1');
+  assert.strictEqual(b.opts.cwd, undefined, '無いフォルダは渡さない');
+  const src = fs.readFileSync(path.join(__dirname, '..', 'src', 'claude-status.js'), 'utf8');
+  assert.ok(/cp\.execFile\(sysTool\('taskkill\.exe'/.test(src), 'taskkill も、絶対パスで');
+  const hubSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'hub.js'), 'utf8');
+  assert.ok(/new ClaudeStatus\(\{[\s\S]{0,200}cwd: store && store\.file \? path\.dirname\(store\.file\)/.test(hubSrc), 'Hub のデータのフォルダで起動する');
+});
 // ---- 時間を使う試験（タイマーを待つ）
 const checkAsync = async (name, fn) => { try { await fn(); pass++; console.log('PASS ' + name); } catch (e) { fail++; console.log('FAIL ' + name + '  [' + e.message + ']'); } };
 (async () => {

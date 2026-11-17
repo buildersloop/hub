@@ -3,7 +3,9 @@
 // 取れないとき（古い Claude Code・時間切れ・読めない）や、一覧に無い会話（フォルダの信頼の確認の最中など）は「分からない」とし、
 // 画面の検出だけで判断する（いままでと同じ）。
 'use strict';
-const { spawn, execFile } = require('child_process');
+const cp = require('child_process');
+const fs = require('fs');
+const { childEnv, sysTool, winShell } = require('./ptys');
 
 // `claude agents --json` の出力を、会話の ID → { status, waitingFor } にする。読めなければ null。
 function parseAgents(out) {
@@ -20,15 +22,17 @@ const isWaiting = (e) => !!e && e.status === 'waiting';
 
 function killTree(p) {
   if (!p || !p.pid) return;
-  if (process.platform === 'win32') execFile('taskkill', ['/PID', String(p.pid), '/T', '/F'], { windowsHide: true }, () => {});
+  if (process.platform === 'win32') cp.execFile(sysTool('taskkill.exe', 'taskkill'), ['/PID', String(p.pid), '/T', '/F'], { windowsHide: true }, () => {});
   else { try { p.kill(); } catch { /* もう終わっている */ } }
 }
 
 class ClaudeStatus {
   // run(cb)：一覧を取り、出力の文字列（失敗は null）を cb に渡す。試験では、差し替える。
   // onUnavailable()：はじめて取れなかったときに 1 回だけ呼ぶ（記録用）。
-  constructor({ env = process.env, ttlMs = 1000, timeoutMs = 4000, maxAgeMs = 15000, run, onUnavailable } = {}) {
+  // cwd：起動するフォルダ（Hub のデータのフォルダ。どのセッションの作業フォルダでもない場所）
+  constructor({ env = process.env, cwd, ttlMs = 1000, timeoutMs = 4000, maxAgeMs = 15000, run, onUnavailable } = {}) {
     this.env = env;
+    this.cwd = cwd;
     this.ttlMs = ttlMs;          // この間は、取り直さない（続けて呼ばれても、1 回だけ動かす）
     this.timeoutMs = timeoutMs;
     this.maxAgeMs = maxAgeMs;    // これより古い情報は使わない
@@ -45,10 +49,11 @@ class ClaudeStatus {
   _exec(cb) {
     const win = process.platform === 'win32';
     // 会話を起動するときと同じく、PATH の claude を使う。引数は固定（外からの値を入れない）。
-    // cmd が、今のフォルダの claude.cmd などを PATH より先に探さないようにする。
-    const env = win ? { ...this.env, NoDefaultCurrentDirectoryInExePath: '1' } : this.env;
-    const p = spawn(win ? (process.env.ComSpec || 'cmd.exe') : '/bin/sh', win ? ['/d', '/c', 'claude agents --json'] : ['-c', 'claude agents --json'],
-      { env, windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] });
+    // 起動の仕方は、ほかの子のプロセスとそろえる（ptys.js の childEnv・絶対パスの cmd）。
+    const env = childEnv(this.env);
+    const cwd = this.cwd && fs.existsSync(this.cwd) ? this.cwd : undefined;
+    const p = cp.spawn(win ? winShell() : '/bin/sh', win ? ['/d', '/c', 'claude agents --json'] : ['-c', 'claude agents --json'],
+      { cwd, env, windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] });
     let out = '';
     let done = false;
     let timer = null;

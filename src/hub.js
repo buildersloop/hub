@@ -69,6 +69,7 @@ class Hub extends EventEmitter {
     // Claude Code 自身が知らせる「人の答えを待っている」（画面の検出を補う。試験では、差し替える）
     this.claudeStatus = claudeStatus || new ClaudeStatus({
       env: cleanEnv(process.env),
+      cwd: store && store.file ? path.dirname(store.file) : undefined,   // Hub のデータのフォルダで起動する
       onUnavailable: () => this.audit('Hub', 'status', 'Claude Code の会話の状態（claude agents --json）が取れません（古い版など）。確認の画面は、画面の文字だけで見ます'),
     });
     // 秘密の値の暗号化（本番は Electron の safeStorage。試験では、暗号化しない代用品）
