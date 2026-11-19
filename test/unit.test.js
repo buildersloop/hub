@@ -141,6 +141,31 @@ check('会話の要約：要約の目印だけの行（isVisibleInTranscriptOnly
   assert.ok(/人：試験を直して[\s\S]*人：続けて[\s\S]*会話が要約されました/.test(conv), '知らせは、要約の位置に出る：' + conv);
   assert.strictEqual(activity.readActivity(f).lastUserPrompt, '続けて');
 });
+check('session_read の会話：長いときは発言の単位で省き、先頭の発言の見出し（人／Claude）を切らない', () => {
+  const rows = [];
+  for (let i = 0; i < 40; i++) {
+    rows.push({ type: 'user', timestamp: ts(60 - i), message: { role: 'user', content: `指示${i} ` + 'あ'.repeat(30) } });
+    rows.push(asst(60 - i, [{ type: 'text', text: `返事${i}\n2 行目 ` + 'い'.repeat(30) + '😀' }]));
+  }
+  const f = mkTranscript(rows);
+  for (const max of [200, 333, 1000, 1234]) {
+    const conv = activity.readConversation(f, max);
+    assert.ok(conv.length <= max, `上限 ${max} を超えない：${conv.length}`);
+    const lines = conv.split('\n');
+    assert.strictEqual(lines[0], '（これより前の会話は省きました）', '省いたことが分かる：' + lines[0]);
+    assert.ok(/^\[\d\d:\d\d\] (人|Claude)：/.test(lines[1]), '最初の発言は見出しから始まる：' + lines[1]);
+    assert.ok(conv.endsWith('😀'), '最後の発言は残す');
+    assert.ok(!/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(^|[^\uD800-\uDBFF])[\uDC00-\uDFFF]/.test(conv), '絵文字を途中で切らない');
+  }
+  // 最後の 1 件だけで長すぎるとき：見出しを残して、その発言の先頭から出す
+  const g = mkTranscript([asst(1, [{ type: 'text', text: 'X'.repeat(50) + '😀'.repeat(300) }])]);
+  const one = activity.readConversation(g, 200);
+  assert.ok(one.length <= 200 && /^\[\d\d:\d\d\] Claude：X/.test(one) && one.endsWith('…'), one);
+  assert.ok(!/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/.test(one), '絵文字を途中で切らない');
+  // 収まるときは、これまでどおり全部（省いた知らせは出さない）
+  const h = mkTranscript([{ type: 'user', timestamp: ts(2), message: { role: 'user', content: '短い' } }, asst(1, [{ type: 'text', text: 'はい' }])]);
+  assert.ok(/^\[\d\d:\d\d\] 人：短い\n\[\d\d:\d\d\] Claude：はい$/.test(activity.readConversation(h)), activity.readConversation(h));
+});
 check('活動の読み取り：記録がなければ、空（落ちない）', () => {
   assert.strictEqual(activity.readActivity('C:\\no\\such.jsonl').exists, false);
 });

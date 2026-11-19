@@ -97,7 +97,23 @@ function readConversation(file, maxChars = 6000) {
       if (tools.length) lines.push(`[${hhmm}]   （ツール：${tools.join('、')}）`);
     }
   }
-  return lines.join('\n').slice(-maxChars);
+  return fitLines(lines, maxChars);
+}
+
+// 発言（lines の 1 件）の単位で、末尾から収まるだけ残す。途中で切ると、先頭の発言の見出し（人／Claude）が消え、誰の発言か分からなくなるため。
+const MORE = '（これより前の会話は省きました）';
+const cutHead = (s, n) => { let t = s.slice(0, Math.max(0, n)); if (/[\uD800-\uDBFF]$/.test(t)) t = t.slice(0, -1); return t; };   // 絵文字の途中で切らない
+function fitLines(lines, maxChars) {
+  const all = lines.join('\n');
+  if (all.length <= maxChars) return all;
+  const kept = [];
+  let len = MORE.length;
+  for (let i = lines.length - 1; i >= 0 && len + 1 + lines[i].length <= maxChars; i--) { kept.unshift(lines[i]); len += 1 + lines[i].length; }
+  if (kept.length) return [MORE, ...kept].join('\n');
+  // 最後の 1 件だけで長すぎる：見出しが残るよう、その発言の先頭から出す
+  const last = lines[lines.length - 1];
+  const head = lines.length > 1 ? MORE + '\n' : '';
+  return head.length + 1 < maxChars ? head + cutHead(last, maxChars - head.length - 1) + '…' : cutHead(last, maxChars - 1) + '…';
 }
 
 // 競合の検出：同じファイル（file）／同じフォルダ（area）を、別のセッションが最近、編集している。宣言（claim）の重なりも。
