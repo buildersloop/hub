@@ -36,6 +36,7 @@ function buildServer(hub, ctx) {
     async (a) => {
       const to = hub.resolveRef(a.id, a.from);
       const body = String(a.text == null ? '' : a.text);
+      await hub.claudeStatus.refresh();   // Claude Code 自身の「答えを待っている」を、新しくしてから判断する
       const r = hub.sendFromAgent(to.id, body.trim() === '' ? body : hub.senderTag(a.from) + body, a.enter !== false, body);
       if (r && r.queued) return text(r.why === 'stopped'
         ? `「${to.name}」は停止中です。送信を預かりました（${r.count} 件目）。相手が起動したときに、自動で渡します。急ぐときは、人に「${to.name}」の再開を頼んでください。`
@@ -48,7 +49,7 @@ function buildServer(hub, ctx) {
     async (a) => text(hub.directory(a.me ? hub.resolveRef(a.me).id : undefined, { all: !!a.all })));
   tool('session_key', 'キーを押す：enter・escape・tab・up・down・left・right・ctrl-c。**権限の確認が出ているときの Enter・矢印・Tab は拒否**（escape・ctrl-c の中断は可）。shift-tab（権限モードの切り替え）は、送れない。',
     { id: z.string(), key: z.enum(['enter', 'escape', 'tab', 'up', 'down', 'left', 'right', 'ctrl-c']), times: z.number().int().min(1).max(10).optional() },
-    async (a) => { hub.sendKey(hub.resolveRef(a.id).id, a.key, a.times || 1, 'agent'); return text(`${a.key} を送りました`); });
+    async (a) => { const id = hub.resolveRef(a.id).id; await hub.claudeStatus.refresh(); hub.sendKey(id, a.key, a.times || 1, 'agent'); return text(`${a.key} を送りました`); });
   tool('work_board', '【共同作業】全セッションが、いま何をしているか（直近の指示・編集中のファイル・実行したコマンド・宣言）と、**競合**（同じファイル／同じフォルダを別のセッションが触っている）。作業を始める前に必ず見る。', {},
     async () => text(hub.board()));
   tool('work_claim', '【共同作業】これから編集する場所（ファイル・フォルダ）を宣言する。重なる宣言や、他のセッションの最近の編集があれば、警告が返る（その場合は手を止めて、人に知らせる）。owner には、環境変数 BL_HUB_SESSION の値（Hub のセッション ID）か、自分の名前。',

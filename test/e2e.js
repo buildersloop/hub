@@ -42,7 +42,8 @@ document.getElementById('ua').textContent = navigator.userAgent;</script></body>
 const fakeBin = fs.mkdtempSync(path.join(os.tmpdir(), 'hub-e2e-bin-'));
 // 事業の作業フォルダ（Hub のデータのフォルダの親・中は、作業フォルダにできないため、別に作る）
 const WORK = fs.mkdtempSync(path.join(os.tmpdir(), 'hub-e2e-work-'));
-fs.writeFileSync(path.join(fakeBin, 'claude.cmd'), '@echo off\r\necho FAKE-CLAUDE ' + 'x'.repeat(240) + '\r\npowershell -NoLogo -NoProfile\r\n');
+// `claude agents --json`（会話の状態）には、fakeBin の agents.json を返す（無ければ空の一覧）
+fs.writeFileSync(path.join(fakeBin, 'claude.cmd'), '@echo off\r\nif /i "%~1"=="agents" goto agents\r\necho FAKE-CLAUDE ' + 'x'.repeat(240) + '\r\npowershell -NoLogo -NoProfile\r\nexit /b\r\n:agents\r\nif exist "%~dp0agents.json" (type "%~dp0agents.json") else (echo [])\r\n');
 const HUMAN_SHELL = 'e2e00000-0000-4000-8000-000000000001';
 
 // 試験用の事業（公開の初期設定は見本 1 件だけなので、試験は自前の事業を、先に入れておく）
@@ -242,6 +243,24 @@ fs.writeFileSync(path.join(ud, 'hub.json'), JSON.stringify({
   check('中断（ctrl-c）は、確認が出ていても送れる', !kr.isError, txt(kr));
   kr = await call('session_key', { id: s3.id, key: 'shift-tab' }).catch((e) => ({ isError: true }));
   check('shift-tab（権限モードの切り替え）は、送れない', kr.isError === true);
+
+  // ---- Claude Code 自身が「答えを待っている」（claude agents --json）とき：画面に確認の語が無くても、Enter・文字を送らない
+  const sw = JSON.parse(txt(await call('session_create', { business: 'gamma', name: 'e2e 待ち' })));
+  check('（待ちの試験の準備）入力を受けられる状態になる', await untilReady(sw.id));
+  const agentsFile = path.join(fakeBin, 'agents.json');
+  fs.writeFileSync(agentsFile, JSON.stringify([{ pid: 1, sessionId: sw.id, status: 'waiting', waitingFor: 'permission prompt' }]));
+  await sleep(1200);   // 状態を取り直す間隔（1 秒）を越える
+  kr = await call('session_key', { id: sw.id, key: 'enter' });
+  check('Claude Code が答えを待っているとき、Enter は拒否される（画面に確認の語が無くても）', kr.isError === true && /答えを待って/.test(txt(kr)), txt(kr));
+  er = await call('session_send', { id: sw.id, text: 'Write-Output hello' });
+  check('Claude Code が答えを待っているとき、文字の入力も拒否', er.isError === true && /答えを待って/.test(txt(er)), txt(er));
+  fs.writeFileSync(agentsFile, JSON.stringify([{ pid: 1, sessionId: sw.id, status: 'idle' }]));
+  await sleep(1200);
+  er = await call('session_send', { id: sw.id, text: 'Write-Output ("WAIT" + "OVER")' });
+  await sleep(1500);
+  out = txt(await call('session_read', { id: sw.id }));
+  check('待ちが終われば、送れる', !er.isError && /WAITOVER/.test(out), txt(er) + ' / ' + out.slice(-80));
+  fs.unlinkSync(agentsFile);
 
   // ---- 共同作業：宣言と競合・ボード
   const c1 = JSON.parse(txt(await call('work_claim', { owner: 'セッションA', areas: ['G:\\p\\src\\app.js'], summary: 'app.js を直す' })));

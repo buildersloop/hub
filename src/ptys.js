@@ -5,7 +5,7 @@ const fs = require('fs');
 const path = require('path');
 const { execFile } = require('child_process');
 const { EventEmitter } = require('events');
-const { stripAnsi } = require('./guard');
+const { stripAnsi, afterLastClear } = require('./guard');
 
 const BUF_MAX = 400 * 1024;
 // 子のプロセスの起動は、作業フォルダの中身に左右されないようにする（コマンドは PATH から探す）。
@@ -23,6 +23,8 @@ function childEnv(env) {
 // Windows の道具（cmd・PowerShell・taskkill）は、Windows のフォルダの絶対パスで起動する
 const SYS32 = path.join(process.env.SystemRoot || process.env.windir || 'C:\\Windows', 'System32');
 const sysTool = (rel, fallback) => { const p = path.join(SYS32, rel); return fs.existsSync(p) ? p : fallback; };
+// cmd の場所（ComSpec は、絶対パスのときだけ使う）
+const winShell = () => (process.env.ComSpec && path.isAbsolute(process.env.ComSpec) ? process.env.ComSpec : sysTool('cmd.exe', 'cmd.exe'));
 // Claude Code が会話の記録を置く場所の規則。Claude Code は、起動したフォルダ（process.cwd()：末尾の区切り・「..」を持たない）で決めるので、
 // 同じ形にそろえてから置き換える（「D:\proj\」のままだと「D--proj-」になり、記録が見つからず、再開が新規の起動になる）。
 const encodeCwd = (cwd) => path.resolve(String(cwd)).replace(/[^a-zA-Z0-9]/g, '-');
@@ -60,7 +62,7 @@ class PtyManager extends EventEmitter {
     // extraEnv：MCP の接続の秘密の値（このセッションだけに渡す。設定ファイルには書かない）
     const env = childEnv({ ...cleanEnv(process.env), TERM: 'xterm-256color', COLORTERM: 'truecolor', ...extraEnv, BL_HUB_SESSION: sess.id });
     const cmd = this.commandFor(sess, claudeArgs);
-    const comspec = process.env.ComSpec && path.isAbsolute(process.env.ComSpec) ? process.env.ComSpec : sysTool('cmd.exe', 'cmd.exe');
+    const comspec = winShell();
     const file = cmd ? comspec : sysTool(path.join('WindowsPowerShell', 'v1.0', 'powershell.exe'), 'powershell.exe');
     const args = cmd ? ['/d', '/c', cmd] : ['-NoLogo'];
     const cwd = fs.existsSync(sess.cwd) ? sess.cwd : os.homedir();
@@ -89,7 +91,7 @@ class PtyManager extends EventEmitter {
   readText(id, maxChars = 6000) {
     const r = this.map.get(id);
     if (!r) return '';
-    const t = stripAnsi(r.buf).split('\n').map((l) => l.replace(/\s+$/g, '')).join('\n').replace(/\n{3,}/g, '\n\n');
+    const t = stripAnsi(afterLastClear(r.buf)).split('\n').map((l) => l.replace(/\s+$/g, '')).join('\n').replace(/\n{3,}/g, '\n\n');
     return t.slice(-maxChars);
   }
   lastOutputAt(id) { const r = this.map.get(id); return r ? r.lastOutputAt : 0; }
@@ -106,4 +108,4 @@ class PtyManager extends EventEmitter {
   stopAll() { for (const id of this.map.keys()) this.stop(id); }
   forget(id) { this.stop(id); this.map.delete(id); }
 }
-module.exports = { PtyManager, encodeCwd, cleanEnv, childEnv };
+module.exports = { PtyManager, encodeCwd, cleanEnv, childEnv, sysTool, winShell };

@@ -1,9 +1,29 @@
 // 入力の安全装置（純粋な関数）。
 // 方針：Claude Code の権限の確認（許可・承認）は、**人がアプリの画面で行う**。エージェントが MCP 経由で、承認を代わりに押せないようにする。
-const ANSI = /\x1b\[[0-9;?]*[ -\/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[()][A-Z0-9]|\x1b[=>]/g;
+const ANSI = /\x1b\[[0-?]*[ -\/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[()][A-Z0-9]|\x1b[=>]/g;
+// Claude Code は、空白を「カーソルを右へ」（ESC[nC）、行の頭を「位置の指定」（ESC[行;列H）で描くことが多い。
+// これらは、空白・改行に置き換えてから読む（語の区切りを残す）。
+const CURSOR_FORWARD = /\x1b\[(\d*)C/g;
+const CURSOR_POSITION = /\x1b\[\d*(?:;\d*)?[Hf]/g;
+
+// 画面を消す制御（ESC[2J・別の画面への切り替え ESC[?1049h・ESC c）より前の文字は、もう画面に無い。
+// 読むときは、最後のものより後だけを見る（答え終わった確認の画面が、末尾に残って、確認ありと見誤るのを防ぐ）。
+// ESC[3J は、さかのぼりの記録だけを消し、見えている画面は残るので、切れ目にしない。
+// 切れ目のあとに、元の画面へ戻る制御（ESC[?1049l）があれば、消す前の画面が戻るので、切らずに全体を読む（安全な側）。
+const CLEAR_SCREEN = /\x1b\[2J|\x1b\[\?1049h|\x1bc/g;
+function afterLastClear(s) {
+  const t = String(s);
+  let end = -1;
+  for (const m of t.matchAll(CLEAR_SCREEN)) end = m.index + m[0].length;
+  if (end < 0 || t.includes('\x1b[?1049l', end)) return t;
+  return t.slice(end);
+}
 
 function stripAnsi(s) {
-  return String(s).replace(ANSI, '').replace(/\r(?!\n)/g, '\n').replace(/[\x00-\x08\x0b\x0c\x0e-\x1f]/g, '');
+  return String(s)
+    .replace(CURSOR_FORWARD, (_, n) => ' '.repeat(Math.min(Math.max(parseInt(n, 10) || 1, 1), 300)))
+    .replace(CURSOR_POSITION, '\n')
+    .replace(ANSI, '').replace(/\r(?!\n)/g, '\n').replace(/[\x00-\x08\x0b\x0c\x0e-\x1f]/g, '');
 }
 
 const APPROVAL_WORDS = new Set([
@@ -33,17 +53,39 @@ const PERMISSION_PATTERNS = [
   /Press Enter to (confirm|continue|approve)/i,
   /permission (request|required|prompt)/i,
   /Esc to cancel/i,
+  /\bEnter to confirm\b/i,
+  /Yes, I trust this folder/i,
+  /Would you like to proceed\?/i,
   /Bypass Permissions|dangerously/i,
 ];
+// 描き直し（変わった所だけを描く）では、文字が抜けたり、空白が増えたりする。空白を全部抜いた形でも、代表的な語を見る
+// （空白の無い型〔(y/n) など〕は、ふつうの型のまま、空白を抜いた形にも当てる）。
+// 語の区切りを見られないので、ほかの語の一部になりやすい語（enter to confirm → "data center to confirm" など）は入れない。
+const SQUEEZED_PATTERNS = [
+  /doyouwantto(proceed|makethisedit|create|allow|run|continue|trust|apply|overwrite|use)/i,
+  /doyoutrust/i,
+  /trustthefilesinthisfolder/i,
+  /yes,?itrustthisfolder/i,
+  /yes,?anddon'?taskagain/i,
+  /esctocancel/i,
+  /wouldyouliketoproceed\?/i,
+];
+const oneSpace = (t) => t.replace(/[ \t]+/g, ' ');
+const squeeze = (t) => t.replace(/\s+/g, '');
+function firstHit(text) {
+  const t = oneSpace(String(text || ''));
+  const a = PERMISSION_PATTERNS.find((re) => re.test(t));
+  if (a) return (t.match(a) || [''])[0] || ' ';
+  const sq = squeeze(t);
+  const b = SQUEEZED_PATTERNS.find((re) => re.test(sq)) || PERMISSION_PATTERNS.find((re) => re.test(sq));
+  return b ? (sq.match(b) || [''])[0] || ' ' : '';
+}
 function looksLikePermissionPrompt(screenText) {
-  const tail = String(screenText || '').slice(-2500);
-  return PERMISSION_PATTERNS.some((re) => re.test(tail));
+  return firstHit(String(screenText || '').slice(-2500)) !== '';
 }
 // 文の中に、確認の画面に使われる語があるか（あれば、その語を返す）。エージェントの文に入っていると、Enter の前の見直しで、本物の確認と区別できないため、送る前に断る。
 function permissionWordsIn(text) {
-  const t = String(text || '');
-  const hit = PERMISSION_PATTERNS.find((re) => re.test(t));
-  return hit ? (t.match(hit) || [''])[0] : '';
+  return firstHit(text);
 }
 // 端末から来た入力のうち、人が打った文字があるか（端末が自動で返す応答・マウスの報告・フォーカスの報告だけなら false）
 function hasTypedInput(data) {
@@ -73,4 +115,4 @@ function isAllowedUrl(u) {
   } catch { return u === 'about:blank'; }
 }
 
-module.exports = { stripAnsi, isApprovalOnly, toTerminalInput, isAllowedUrl, looksLikePermissionPrompt, permissionWordsIn, hasTypedInput, KEYS };
+module.exports = { stripAnsi, afterLastClear, isApprovalOnly, toTerminalInput, isAllowedUrl, looksLikePermissionPrompt, permissionWordsIn, hasTypedInput, KEYS };
