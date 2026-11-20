@@ -75,7 +75,7 @@ node test/hubctl.js <tool> '<json>'      # 動いている Hub を、MCP で操�
 - **ブラウザの入力・撮影は、CDP（`Input.*`・`Page.captureScreenshot`）を主にする**（モニターのスリープ・画面ロック中でも動く。`sendInputEvent`・`capturePage` は、予備）。
 
 ## 開発の流れ
-1. 変更 → `npm test` → `npm run e2e`（40 件前後が通る）。
+1. 変更 → `npm test` → `npm run e2e`（60 件あまりが通る。V8.2 で 65 件）。
 2. 画面の見た目は、`BL_HUB_SHOT_JS`／`BL_HUB_SHOT_OUT`（試験用の撮影フック）か、MCP の `ui_screenshot` で確認する。
 3. 設計の変更は、README の該当の節に、理由とともに、追記する。版の変更点は `CHANGELOG.md` に書く。
 
