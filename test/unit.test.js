@@ -234,6 +234,18 @@ check('session_read の会話：長いときは発言の単位で省き、先頭
   const h = mkTranscript([{ type: 'user', timestamp: ts(2), message: { role: 'user', content: '短い' } }, asst(1, [{ type: 'text', text: 'はい' }])]);
   assert.ok(/^\[\d\d:\d\d\] 人：短い\n\[\d\d:\d\d\] Claude：はい$/.test(activity.readConversation(h)), activity.readConversation(h));
 });
+check('session_read の会話：記録の時刻が無い・壊れている行は、見出しの時刻を --:-- にする（Invalid Date を出さない）', () => {
+  const f = mkTranscript([
+    { type: 'user', timestamp: 'not-a-date', message: { role: 'user', content: '壊れた時刻' } },
+    { type: 'user', message: { role: 'user', content: '時刻なし' } },
+    { type: 'assistant', timestamp: {}, message: { role: 'assistant', content: [{ type: 'text', text: 'はい' }] } },
+    { type: 'user', timestamp: ts(1), message: { role: 'user', content: 'ふつう' } },
+  ]);
+  const conv = activity.readConversation(f);
+  assert.ok(!/Inval/.test(conv), 'Invalid Date を出さない：' + conv);
+  assert.ok(/^\[--:--\] 人：壊れた時刻\n\[--:--\] 人：時刻なし\n\[--:--\] Claude：はい\n\[\d\d:\d\d\] 人：ふつう$/.test(conv), conv);
+  assert.strictEqual(activity.readActivity(f).lastUserPrompt, 'ふつう', '活動の読み取りも落ちない');
+});
 check('活動の読み取り：記録がなければ、空（落ちない）', () => {
   assert.strictEqual(activity.readActivity('C:\\no\\such.jsonl').exists, false);
 });

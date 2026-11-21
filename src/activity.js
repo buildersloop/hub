@@ -73,6 +73,13 @@ function readActivity(file, { sinceMs = 6 * 3600 * 1000 } = {}) {
   return out;
 }
 
+// 見出しの時刻（hh:mm）。記録の時刻が無い・壊れている行（Claude Code 2.1.330 で、こうした行の再開の不具合が直った）は、
+// "Invalid Date" の切れ端（[Inval]）や空の [] を出さず、時刻が分からないことを --:-- で示す。
+const timeOf = (ts) => {
+  const d = typeof ts === 'string' || typeof ts === 'number' ? new Date(ts) : null;
+  return d && !Number.isNaN(d.getTime()) ? d.toTimeString().slice(0, 5) : '--:--';
+};
+
 // 直近の会話（人と Claude の発言）を、読みやすく取り出す（画面の再描画に影響されない）
 function readConversation(file, maxChars = 6000) {
   if (!file || !fs.existsSync(file)) return '';
@@ -84,7 +91,7 @@ function readConversation(file, maxChars = 6000) {
     let o;
     try { o = JSON.parse(line); } catch { continue; }
     const msg = o.message || {};
-    const hhmm = o.timestamp ? new Date(o.timestamp).toTimeString().slice(0, 5) : '';
+    const hhmm = timeOf(o.timestamp);
     if (o.type === 'user' && !o.isSidechain && isCompactSummary(o)) {
       if (lastNote < 0 || lastNote !== lines.length - 1) { lines.push(`[${hhmm}] ${NOTE}`); lastNote = lines.length - 1; }
     } else if (o.type === 'user') {
