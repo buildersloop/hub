@@ -100,9 +100,19 @@ function hasTypedInput(data) {
 // エージェントが送ってよい「キー」。shift-tab（権限モードの切り替え）は、含めない。
 const KEYS = { enter: '\r', escape: '\x1b', tab: '\t', up: '\x1b[A', down: '\x1b[B', left: '\x1b[D', right: '\x1b[C', 'ctrl-c': '\x03' };
 
+// 端末に入れてはいけない制御文字（改行・タブ・復帰以外）。
+const CONTROL = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]/;
+const CONTROL_ALL = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]/g;
+// 文の中の制御文字（あれば、その 1 文字。無ければ空）。エージェントの文は、これがあれば送る前に断る。
+function controlCharIn(text) {
+  const m = CONTROL.exec(String(text == null ? '' : text));
+  return m ? m[0] : '';
+}
+
 // 端末に送る文字列を作る（複数行は、貼り付けとして送る）。
+// 制御文字は、必ず除く（断る検査をすり抜けた場合の備え。人の文も同じ。改行・タブは残す）。
 function toTerminalInput(text, enter = true) {
-  const s = String(text);
+  const s = String(text).replace(CONTROL_ALL, '');
   const body = /[\r\n]/.test(s) ? `\x1b[200~${s.replace(/\r\n/g, '\n').replace(/\n/g, '\r')}\x1b[201~` : s;
   return body + (enter ? '\r' : '');
 }
@@ -115,4 +125,4 @@ function isAllowedUrl(u) {
   } catch { return u === 'about:blank'; }
 }
 
-module.exports = { stripAnsi, afterLastClear, isApprovalOnly, toTerminalInput, isAllowedUrl, looksLikePermissionPrompt, permissionWordsIn, hasTypedInput, KEYS };
+module.exports = { stripAnsi, afterLastClear, isApprovalOnly, toTerminalInput, controlCharIn, isAllowedUrl, looksLikePermissionPrompt, permissionWordsIn, hasTypedInput, KEYS };

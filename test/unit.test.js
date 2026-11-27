@@ -123,6 +123,16 @@ check('確認の語：空白を抜いた形でも、エージェントの文か�
   assert.strictEqual(permissionWordsIn('Write-Output ("Do you want to pro" + "ceed?")'), '', '動詞が無ければ、確認の見出しとは見なさない');
   assert.strictEqual(permissionWordsIn('フォルダの信頼の確認を点検して'), '');
 });
+check('制御文字：エージェントの文の中の制御文字を見つけ、端末に送る前に必ず除く（改行・タブは残す）', () => {
+  const { controlCharIn } = require('../src/guard');
+  for (const t of ['a\x1bb', 'stop\x03', 'del\x7f', 'c1\x9b', 'nul\x00', 'bell\x07']) assert.ok(controlCharIn(t), JSON.stringify(t));
+  for (const t of ['ふつうの文', '1 行目\n2 行目', 'タブ\tあり', 'CRLF\r\nあり', '', null]) assert.strictEqual(controlCharIn(t), '', JSON.stringify(t));
+  const out = toTerminalInput('a\x1bb\x03c\x9bd\ne', false);
+  assert.strictEqual(out, '\x1b[200~abcd\re\x1b[201~');
+  assert.strictEqual(out.split('\x1b').length - 1, 2, 'ESC は、貼り付けの始まりと終わりの 2 つだけ');
+  assert.strictEqual(toTerminalInput('x\x1by'), 'xy\r', '1 行の文からも除く');
+  assert.strictEqual(toTerminalInput('タブ\tと改行\nは残す', false), '\x1b[200~タブ\tと改行\rは残す\x1b[201~');
+});
 check('Claude Code の会話の状態（claude agents --json）を読む', () => {
   const { parseAgents, isWaiting } = require('../src/claude-status');
   const m = parseAgents(JSON.stringify([
@@ -540,6 +550,24 @@ check('送信元の見出しを付けても、承認語だけの送信は拒否�
   ptys.write = () => true;
   assert.throws(() => hub.sendFromAgent(a.id, hub.senderTag(a.id) + 'はい', true, 'はい'), /承認/);
   assert.doesNotThrow(() => hub.sendFromAgent(a.id, hub.senderTag(a.id) + 'ふつうの連絡です', true, 'ふつうの連絡です'));
+});
+check('エージェントの文に、改行・タブ以外の制御文字があれば断る（送信・預かり・最初の指示・プロファイル・プリセット・セットアップ担当）', () => {
+  const { hub, ptys } = mkHub();
+  const written = [];
+  ptys.write = (id, d) => { written.push(d); return true; };
+  const a = hub.createSession({ by: 'human', businessId: 'hub', name: 'X', kind: 'claude', start: true });
+  hub._markReady(a.id);
+  const bad = '連絡です\x1b';
+  assert.throws(() => hub.sendFromAgent(a.id, hub.senderTag(a.id) + bad, true, bad), /制御文字/);
+  assert.throws(() => hub.sendFromAgent(a.id, 'stop\x03', true), /制御文字/);
+  assert.strictEqual(written.length, 0, '何も打たない');
+  const stopped = hub.createSession({ by: 'human', businessId: 'hub', name: 'Y', kind: 'claude', start: false });
+  assert.throws(() => hub.sendFromAgent(stopped.id, 'あとで\x7f', true), /制御文字/, '預からない');
+  assert.throws(() => hub.createSession({ businessId: 'hub', name: 'Z', kind: 'claude', prompt: 'はじめに\x1b', by: 'agent', start: false }), /制御文字/);
+  assert.throws(() => hub.profileUpsert({ name: 'p', sessions: [{ business: 'hub', prompt: 'x\x9b' }] }, 'agent'), /制御文字/);
+  assert.throws(() => hub.presetUpsert({ business: 'hub', name: 'q', prompt: 'x\x1b' }, 'agent'), /制御文字/);
+  assert.throws(() => hub.startSetupAgent({ task: 'x\x03' }, 'agent'), /制御文字/);
+  assert.doesNotThrow(() => hub.sendFromAgent(a.id, hub.senderTag(a.id) + '1 行目\n2 行目\tタブ', true, '1 行目\n2 行目\tタブ'), '改行・タブは通す');
 });
 check('MCP の入口：エージェントは、シェル・コマンドのセッションを作れない・入力できない（人の画面はできる）', () => {
   const { hub, ptys } = mkHub();
