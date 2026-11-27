@@ -4,7 +4,7 @@ const { EventEmitter } = require('events');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { isApprovalOnly, toTerminalInput, looksLikePermissionPrompt, permissionWordsIn, hasTypedInput, KEYS, isAllowedUrl } = require('./guard');
+const { isApprovalOnly, toTerminalInput, controlCharIn, looksLikePermissionPrompt, permissionWordsIn, hasTypedInput, KEYS, isAllowedUrl } = require('./guard');
 const { ClaudeStatus } = require('./claude-status');
 const { cleanEnv } = require('./ptys');
 const activity = require('./activity');
@@ -527,7 +527,10 @@ class Hub extends EventEmitter {
   }
   // 確認の画面に使われる語（例：Do you want to proceed・Esc to cancel・permission prompt）を含むエージェントの文は、送らない。
   // Enter の直前の見直しで、本物の確認の画面と区別できないため。言い換えてもらう（例：「権限の確認」）。
+  // あわせて、改行・タブ以外の制御文字がある文も、送らない。
   _assertNoPermissionWords(text) {
+    const c = controlCharIn(text);
+    if (c) throw new Error(`文の中に、制御文字（U+${c.charCodeAt(0).toString(16).toUpperCase().padStart(4, '0')}）があります。改行・タブ以外の制御文字は、送れません`);
     const w = permissionWordsIn(text);
     if (w) throw new Error(`文の中に、確認の画面に使われる語（「${w.slice(0, 40)}」）があります。本物の確認の画面と区別できないため、送れません。日本語などに言い換えてください（例：「権限の確認」）`);
   }
@@ -835,6 +838,7 @@ ${b.note ? `\n## 事業メモ\n${b.note}\n` : ''}
     if (!b) throw new Error(`事業 ${business} がありません`);
     if (!name || !prompt) throw new Error('name と prompt が必要です');
     if (String(prompt).length > 3000) throw new Error('prompt は 3000 文字まで');
+    if (by !== 'human') this._assertNoPermissionWords(prompt);   // エージェントが作るプリセット（人がボタンで送る）にも、同じ検査
     const p = b.presets.find((x) => x.name === name);
     if (p) { p.prompt = String(prompt); p.by = by; } else b.presets.push({ name: String(name).slice(0, 60), prompt: String(prompt), by });
     this.store.save();
